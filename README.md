@@ -1,20 +1,30 @@
 # Discord Event Reminder Bot
 
-A containerized Discord bot that allows authorized users to schedule recurring daily reminders via a Modal interface.
+A containerized Discord bot that allows authorized users to schedule recurring reminders (Daily, Weekly, Monthly, or One-time) with integrated Giphy support.
 
 ## 🚀 Features
 
+- **Advanced Scheduling**:
+    - **Daily**: Repeats every day at a specific time.
+    - **Weekly**: Repeats on a specific day of the week.
+    - **Monthly**: Repeats on a specific day of the month.
+    - **One-time**: Fires once and automatically deletes itself.
+- **Visuals**: Search and attach GIFs from Giphy directly within the setup flow.
 - **Slash Commands**: `/remind-setup` and `/remind-edit`.
-- **Modal UI**: Easy-to-use form for setting event names and times (24h format).
-- **Multiple IDs**: Support for multiple authorized roles and target channels.
-- **Persistence**: Reminders are stored in a local SQLite database (`/data/bot.db`).
+- **Interactive UI**:
+    - Wizard-style setup (Channel -> Frequency -> Details -> GIF).
+    - Dynamic Modals (Date field hides for Daily reminders).
+    - Select Menus for managing existing reminders.
+- **Privacy & Security**:
+    - Reminders are isolated per-server (Guild).
+    - Role-based access control.
 - **Containerized**: Ready for 24/7 deployment using Docker.
-- **Logging**: Dual logging to console and local `.log` files.
 
 ## 🛠 Prerequisites
 
 - [Docker](https://www.docker.com/) and Docker Compose.
 - A Discord Bot Token (from [Discord Developer Portal](https://discord.com/developers/applications)).
+- A Giphy API Key (from [Giphy Developers](https://developers.giphy.com/)).
 - Developer Mode enabled in Discord to copy IDs.
 
 ## ⚙️ Setup & Configuration
@@ -25,7 +35,8 @@ A containerized Discord bot that allows authorized users to schedule recurring d
    ```env
    DISCORD_TOKEN=your_bot_token_here
    AUTHORIZED_ROLE_ID=role_id_1,role_id_2
-   DEFAULT_CHANNEL_ID=channel_id_1,channel_id_2
+   GIPHY_API_KEY=your_giphy_api_key_here
+   # Optional fallback
    REMINDER_GIF_URL=https://media.giphy.com/media/.../giphy.gif
    ```
 
@@ -43,8 +54,15 @@ docker-compose up -d --build
 
 ## 📝 Commands
 
-- `/remind-setup`: Opens a modal to create a new daily reminder. If multiple channels are configured, you will be prompted to select a target channel first.
-- `/remind-edit`: Displays a list of active reminders with buttons to delete them.
+### `/remind-setup`
+Starts the interactive setup wizard:
+1.  **Channel Selection**: Choose where the reminder should be sent (if applicable).
+2.  **Frequency**: Select Daily, Weekly, Monthly, or One-time.
+3.  **Details**: Enter Event Name, Time (UTC), and Date (if not Daily).
+4.  **GIF Theme**: Search for a GIF to attach to the reminder.
+
+### `/remind-edit`
+Displays a dropdown of active reminders to edit or delete them.
 
 ## 🔍 Troubleshooting
 
@@ -52,8 +70,7 @@ docker-compose up -d --build
   ```bash
   docker-compose logs -f
   ```
-- **Local Logs**: Check `bot.log` or `reminder.log` in the project directory.
-- **Database**: The database is stored in the `./data` volume to persist across container updates.
+- **Database**: The database is stored in the `./data` volume. If you experience schema errors after an update, delete `data/bot.db` and restart the bot to recreate it.
 
 ---
 
