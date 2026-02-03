@@ -52,17 +52,29 @@ Run the bot in the background:
 docker-compose up -d --build
 ```
 
-## 📝 Commands
+## 📖 User Guide
 
-### `/remind-setup`
-Starts the interactive setup wizard:
-1.  **Channel Selection**: Choose where the reminder should be sent (if applicable).
-2.  **Frequency**: Select Daily, Weekly, Monthly, or One-time.
-3.  **Details**: Enter Event Name, Time (UTC), and Date (if not Daily).
-4.  **GIF Theme**: Search for a GIF to attach to the reminder.
+### 1️⃣ Setting a Reminder
+Type `/remind-setup` and follow the interactive wizard:
 
-### `/remind-edit`
-Displays a dropdown of active reminders to edit or delete them.
+1.  **Select Channel**: Choose the channel where the bot should post.
+2.  **Select Frequency**:
+    *   **Daily**: Repeating every day.
+    *   **Weekly**: Repeating every week (on the day of the date provided).
+    *   **Monthly**: Repeating every month (on the day of the date provided).
+    *   **One-time**: Runs once and then auto-deletes.
+3.  **Enter Details**:
+    *   **Name**: Event title (e.g., "Raid Time").
+    *   **Time**: 24-hour UTC format (e.g., `18:00`).
+    *   **Date**: Required for non-daily events (Format: `YYYY-MM-DD`).
+    *   **GIF Theme**: Keyword to search Giphy. **Leave blank** for no GIF.
+4.  **GIF Selection**: If you entered a search term, pick your favorite GIF from the preview menu.
+
+### 2️⃣ Managing Reminders
+Type `/remind-edit` to manage active reminders:
+*   Select a reminder from the dropdown list.
+*   **Edit Details**: Update the event name or time.
+*   **Delete**: Permanently remove the reminder.
 
 ## 🔍 Troubleshooting
 

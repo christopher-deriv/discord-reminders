@@ -13,11 +13,14 @@ import database
 import giphy_client
 
 # Configure logging
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("bot.log"),
+        logging.FileHandler("logs/bot.log"),
         logging.StreamHandler()
     ]
 )
@@ -37,10 +40,21 @@ class ReminderBot(commands.Bot):
     async def setup_hook(self):
         database.init_db()
         self.check_reminders.start()
+        # Register global error handler for app commands
+        self.tree.on_error = self.on_tree_error
         logging.info("Database initialized and scheduler started.")
+
+    async def on_tree_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CheckFailure):
+            # We already logged the specific details in the check function itself.
+            # Just log a concise message here to acknowledge the blocked command without a traceback.
+            logging.warning(f"Command '{interaction.command.name}' blocked by authorization check.")
+        else:
+            logging.error(f"Ignoring exception in command '{interaction.command.name}':", exc_info=error)
 
     async def on_ready(self):
         logging.info(f'Logged in as {self.user} (ID: {self.user.id})')
+        logging.info(f'Current Bot Time (UTC): {datetime.now(timezone.utc)}')
         try:
             synced = await self.tree.sync()
             logging.info(f"Synced {len(synced)} command(s)")
@@ -63,6 +77,10 @@ class ReminderBot(commands.Bot):
                     should_send = True
             
             elif recurrence == 'once':
+                # DEBUG REMINDER
+                if target_time == current_time_str:
+                     logging.info(f"Checking ONCE reminder: Current Date={current_date_str}, Target Date={target_date}")
+
                 if target_time == current_time_str and target_date == current_date_str:
                     should_send = True
                     # Schedule deletion after sending
@@ -228,17 +246,38 @@ class ReminderModal(discord.ui.Modal, title='Setup Reminder'):
             if self.recurrence != 'daily':
                 # Check for the attribute first, just in case
                 if hasattr(self, 'target_date'):
-                    date_val = self.target_date.value
+                    date_val = self.target_date.value.strip()
                     try:
                         datetime.strptime(date_val, "%Y-%m-%d")
                     except ValueError:
                         await interaction.response.send_message('Invalid date format. Please use YYYY-MM-DD.', ephemeral=True)
                         return
             
+            # Check if GIF search term is provided
+            if not self.search_term.value:
+                # No GIF requested, save immediately
+                success = database.add_reminder(
+                    self.guild_id,
+                    self.event_name.value,
+                    self.target_time.value,
+                    self.channel_id,
+                    interaction.user.id,
+                    None, # No GIF
+                    self.recurrence,
+                    date_val
+                )
+                
+                if success:
+                    logging.info(f"User {interaction.user.id} created reminder without GIF")
+                    await interaction.response.send_message(f"Reminder set for **{self.event_name.value}** at **{self.target_time.value}** ({self.recurrence})!", ephemeral=True)
+                else:
+                    await interaction.response.send_message("Failed to save reminder.", ephemeral=True)
+                return
+
             # Defer response since Giphy API might take a moment
             await interaction.response.defer(ephemeral=True)
             
-            search_query = self.search_term.value or "reminder"
+            search_query = self.search_term.value
             gifs = await giphy_client.search_gifs(search_query)
             
             if not gifs:
@@ -353,10 +392,32 @@ class EditReminderModal(discord.ui.Modal, title='Edit Reminder'):
 
 class EditSelect(discord.ui.Select):
     def __init__(self, reminders):
-        options = [
-            discord.SelectOption(label=f"{name} ({time} UTC)", value=str(rid)) 
-            for rid, name, time, _, _, _, _ in reminders
-        ]
+        options = []
+        for rid, name, time, _, _, recurrence, target_date in reminders:
+            label = f"{name}"
+            desc = f"{time} UTC"
+            
+            if recurrence == 'daily':
+                desc += " (Daily)"
+            elif recurrence == 'weekly':
+                # Parse date to get weekday
+                try:
+                    dt = datetime.strptime(target_date, "%Y-%m-%d")
+                    day_name = dt.strftime("%A")
+                    desc += f" (Weekly on {day_name}s)"
+                except:
+                    desc += " (Weekly)"
+            elif recurrence == 'monthly':
+                 try:
+                    dt = datetime.strptime(target_date, "%Y-%m-%d")
+                    day_num = dt.day
+                    desc += f" (Monthly on the {day_num})"  # Suffix logic omitted for brevity
+                 except:
+                    desc += " (Monthly)"
+            elif recurrence == 'once':
+                desc += f" (Once on {target_date})"
+                
+            options.append(discord.SelectOption(label=label[:100], description=desc[:100], value=str(rid)))
         super().__init__(placeholder="Select a reminder to manage...", options=options)
         self.reminders = {str(rid): (name, time) for rid, name, time, _, _, _, _ in reminders}
 
