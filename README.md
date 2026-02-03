@@ -84,6 +84,10 @@ Type `/remind-edit` to manage active reminders:
   ```
 - **Database**: The database is stored in the `./data` volume. If you experience schema errors after an update, delete `data/bot.db` and restart the bot to recreate it.
 
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ---
 
 *Found a bug? Open an issue or submit a PR!*
