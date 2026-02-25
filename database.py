@@ -42,6 +42,18 @@ def add_reminder(guild_id, event_name, target_time, channel_id, created_by, gif_
         print(f"Database error: {e}")
         return False
 
+def update_reminder_date(reminder_id, new_target_date):
+    """Updates only the target_date for a specific reminder."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE reminders SET target_date = ? WHERE id = ?", (new_target_date, reminder_id))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"Database error (update_reminder_date): {e}")
+        return False
+
 def get_reminders():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()

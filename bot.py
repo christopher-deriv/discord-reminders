@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 import database
 import giphy_client
@@ -100,6 +100,34 @@ class ReminderBot(commands.Bot):
                     if now.day == target_dt.day:
                         should_send = True
 
+            elif recurrence == 'every_other_day':
+                # Parse date to get next due date
+                try:
+                    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+
+                    # Logic:
+                    # 1. If date is in the past (< today), we missed it. Send and catch up.
+                    # 2. If date is today, check time.
+                    #    - If time is now or passed, send and update.
+
+                    is_past_date = target_dt.date() < now.date()
+                    is_due_today = (target_dt.date() == now.date()) and (target_time <= current_time_str)
+
+                    if is_past_date or is_due_today:
+                        should_send = True
+                        # Schedule next occurrence: add 2 days to the CURRENT target date
+                        next_date = target_dt + timedelta(days=2)
+                        next_date_str = next_date.strftime("%Y-%m-%d")
+
+                        # We need to update the DB immediately to prevent double firing in next loop (if logic was looser)
+                        # or just to ensure persistence.
+                        # Also handles the "catch up" by moving the date forward.
+                        database.update_reminder_date(rid, next_date_str)
+                        logging.info(f"Updated every_other_day reminder {rid} to next date: {next_date_str}")
+
+                except ValueError:
+                    logging.error(f"Invalid date format for reminder {rid}: {target_date}")
+
             if should_send:
                 channel = self.get_channel(channel_id)
                 if channel:
@@ -113,6 +141,7 @@ class ReminderBot(commands.Bot):
                         case 'daily': footer = "Daily reminder"
                         case 'weekly': footer = "Weekly reminder"
                         case 'monthly': footer = "Monthly reminder"
+                        case 'every_other_day': footer = "Every Other Day reminder"
                         case _: footer = "Reminder"
                     embed.set_footer(text=footer)
                     await channel.send(content="@everyone", embed=embed, allowed_mentions=discord.AllowedMentions.all())
@@ -309,6 +338,7 @@ class FrequencySelect(discord.ui.Select):
     def __init__(self, guild_id, channel_id):
         options = [
             discord.SelectOption(label="Daily", description="Repeats every day at the specified time", value="daily", emoji="🔁"),
+            discord.SelectOption(label="Every Other Day", description="Repeats every 48 hours", value="every_other_day", emoji="⏭️"),
             discord.SelectOption(label="Weekly", description="Repeats on this day every week", value="weekly", emoji="📅"),
             discord.SelectOption(label="Monthly", description="Repeats on this date every month", value="monthly", emoji="📆"),
             discord.SelectOption(label="One-time", description="Remind once then auto-delete", value="once", emoji="1️⃣"),
@@ -414,6 +444,8 @@ class EditSelect(discord.ui.Select):
                     desc += f" (Monthly on the {day_num})"  # Suffix logic omitted for brevity
                  except:
                     desc += " (Monthly)"
+            elif recurrence == 'every_other_day':
+                desc += f" (Every other day from {target_date})"
             elif recurrence == 'once':
                 desc += f" (Once on {target_date})"
                 
