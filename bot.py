@@ -237,7 +237,7 @@ class GifSelectionView(discord.ui.View):
         await interaction.response.edit_message(content="Reminder Setup Cancelled.", view=None, embed=None)
 
 class ReminderModal(discord.ui.Modal, title='Setup Reminder'):
-    event_name = discord.ui.TextInput(label='Event Name', placeholder='e.g., Arena Time')
+    event_name = discord.ui.TextInput(label='Event Name', placeholder='e.g., Arena Time', max_length=100)
     target_time = discord.ui.TextInput(label='Time (HH:MM UTC)', placeholder='e.g., 23:55', min_length=5, max_length=5)
 
     def __init__(self, guild_id, channel_id, recurrence):
@@ -401,7 +401,7 @@ class EditReminderModal(discord.ui.Modal, title='Edit Reminder'):
     def __init__(self, reminder_id, current_name, current_time):
         super().__init__()
         self.reminder_id = reminder_id
-        self.event_name = discord.ui.TextInput(label='Event Name', default=current_name)
+        self.event_name = discord.ui.TextInput(label='Event Name', default=current_name, max_length=100)
         self.target_time = discord.ui.TextInput(label='Time (HH:MM UTC)', default=current_time, min_length=5, max_length=5)
         self.add_item(self.event_name)
         self.add_item(self.target_time)
