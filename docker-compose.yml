@@ -6,6 +6,9 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./gcp-key.json:/app/gcp-key.json:ro
     env_file:
       - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
     restart: unless-stopped

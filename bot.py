@@ -11,6 +11,9 @@ from datetime import datetime, timezone, timedelta
 import logging
 import database
 import giphy_client
+from google.cloud import translate_v2 as translate
+from google.auth.exceptions import DefaultCredentialsError
+from collections import deque
 
 # Configure logging
 if not os.path.exists('logs'):
@@ -31,11 +34,30 @@ AUTHORIZED_ROLE_IDS = [int(x.strip()) for x in os.getenv("AUTHORIZED_ROLE_ID", "
 DEFAULT_CHANNEL_IDS = [int(x.strip()) for x in os.getenv("DEFAULT_CHANNEL_ID", "").split(",") if x.strip()]
 REMINDER_GIF_URL = os.getenv("REMINDER_GIF_URL")
 
+FLAG_LANG_MAP = {
+    "🇪🇸": "es", "🇫🇷": "fr", "🇩🇪": "de", "🇮🇹": "it", "🇵🇹": "pt",
+    "🇨🇳": "zh-CN", "🇹🇼": "zh-TW", "🇯🇵": "ja", "🇰🇷": "ko", "🇮🇳": "hi",
+    "🇧🇩": "bn", "🇹🇭": "th", "🇻🇳": "vi", "🇮🇩": "id", "🇲🇾": "ms",
+    "🇷🇺": "ru", "🇳🇱": "nl", "🇵🇱": "pl", "🇹🇷": "tr", "🇸🇪": "sv",
+    "🇩🇰": "da", "🇳🇴": "no", "🇫🇮": "fi", "🇨🇿": "cs", "🇭🇺": "hu",
+    "🇷🇴": "ro", "🇬🇷": "el", "🇺🇦": "uk", "🇸🇦": "ar", "🇮🇱": "he"
+}
+
 class ReminderBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.members = True
+        intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
+
+        self.translated_messages = set()
+        self.translated_messages_queue = deque(maxlen=1000) # Keep max 1000 records to prevent memory leak
+        self.translate_client = None
+        try:
+            self.translate_client = translate.Client()
+            logging.info("Google Cloud Translate client initialized successfully.")
+        except DefaultCredentialsError:
+            logging.warning("Google Cloud Translate client failed to initialize due to missing credentials. Translation feature will not work.")
 
     async def setup_hook(self):
         database.init_db()
@@ -60,6 +82,67 @@ class ReminderBot(commands.Bot):
             logging.info(f"Synced {len(synced)} command(s)")
         except Exception as e:
             logging.error(f"Failed to sync commands: {e}")
+
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        if not self.translate_client:
+            return
+
+        emoji_name = payload.emoji.name
+        if emoji_name not in FLAG_LANG_MAP:
+            return
+
+        target_lang = FLAG_LANG_MAP[emoji_name]
+        message_id = payload.message_id
+
+        # Check cache to prevent translating the same message to the same language multiple times
+        cache_key = (message_id, target_lang)
+        if cache_key in self.translated_messages:
+            return
+
+        # Lock cache early to prevent race condition when multiple users react at the same time
+        self.translated_messages.add(cache_key)
+        self.translated_messages_queue.append(cache_key)
+
+        # Cleanup old cache entries
+        if len(self.translated_messages) > 1000:
+            while len(self.translated_messages) > len(self.translated_messages_queue):
+                # Queue handles maxlen automatically, so if set is larger,
+                # we just rebuild the set to match the queue's current state.
+                self.translated_messages = set(self.translated_messages_queue)
+
+        channel = self.get_channel(payload.channel_id)
+        if not channel:
+            return
+
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            return
+        except discord.Forbidden:
+            return
+
+        # Ignore messages from bots and empty messages
+        if message.author.bot or not message.content:
+            return
+
+        # Perform the translation call
+        try:
+            # Use asyncio.to_thread to prevent blocking the event loop with synchronous GCP API call
+            result = await asyncio.to_thread(
+                self.translate_client.translate,
+                message.content,
+                target_language=target_lang,
+                format_="text"
+            )
+            translated_text = result["translatedText"]
+
+            # Send reply
+            await message.reply(content=translated_text)
+            logging.info(f"Translated message {message_id} to {target_lang}")
+        except Exception as e:
+            # Revert cache lock if translation failed
+            self.translated_messages.discard(cache_key)
+            logging.error(f"Failed to translate message {message_id}: {e}")
 
     @tasks.loop(seconds=60)
     async def check_reminders(self):
