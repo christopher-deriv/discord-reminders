@@ -16,4 +16,7 @@ RUN mkdir -p /app/data
 # Environment variable for database path
 ENV DB_PATH=/app/data/bot.db
 
+# Environment variable for Google Cloud credentials
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
+
 CMD ["python", "bot.py"]

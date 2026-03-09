@@ -32,6 +32,11 @@ class TestInputValidation(unittest.TestCase):
         sys.modules['dotenv'] = MagicMock()
         sys.modules['database'] = MagicMock()
         sys.modules['giphy_client'] = MagicMock()
+        sys.modules['google'] = MagicMock()
+        sys.modules['google.cloud'] = MagicMock()
+        sys.modules['google.cloud.translate_v2'] = MagicMock()
+        sys.modules['google.auth'] = MagicMock()
+        sys.modules['google.auth.exceptions'] = MagicMock()
 
         # Reload bot to apply mocks and re-execute class definitions
         if 'bot' in sys.modules:
