@@ -160,10 +160,6 @@ class ReminderBot(commands.Bot):
                     should_send = True
             
             elif recurrence == 'once':
-                # DEBUG REMINDER
-                if target_time == current_time_str:
-                     logging.info(f"Checking ONCE reminder: Current Date={current_date_str}, Target Date={target_date}")
-
                 if target_time == current_time_str and target_date == current_date_str:
                     should_send = True
                     # Schedule deletion after sending
