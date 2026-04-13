@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 import logging
 import database
 import giphy_client
+import functools
 from google.cloud import translate_v2 as translate
 from collections import deque
 
@@ -143,6 +144,11 @@ class ReminderBot(commands.Bot):
             self.translated_messages.discard(cache_key)
             logging.error(f"Failed to translate message {message_id}: {e}")
 
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def parse_date(date_str):
+        return datetime.strptime(date_str, "%Y-%m-%d")
+
     @tasks.loop(seconds=60)
     async def check_reminders(self):
         now = datetime.now(timezone.utc)
@@ -167,32 +173,43 @@ class ReminderBot(commands.Bot):
             elif recurrence == 'weekly':
                 # Check if today matches the target weekday
                 if target_time == current_time_str:
-                    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
-                    if now.weekday() == target_dt.weekday():
-                        should_send = True
+                    try:
+                        target_dt = self.parse_date(target_date)
+                        if now.weekday() == target_dt.weekday():
+                            should_send = True
+                    except (ValueError, TypeError):
+                        logging.error(f"Invalid date format for weekly reminder {rid}: {target_date}")
 
             elif recurrence == 'monthly':
                 # Check if today matches the target day of month
                 if target_time == current_time_str:
-                    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
-                    if now.day == target_dt.day:
-                        should_send = True
+                    # Faster check using string slicing before full date parse
+                    try:
+                        if int(target_date[8:10]) == now.day:
+                            should_send = True
+                    except (ValueError, TypeError, IndexError):
+                        # Fallback or error log if date string is weird
+                        try:
+                            target_dt = self.parse_date(target_date)
+                            if now.day == target_dt.day:
+                                should_send = True
+                        except (ValueError, TypeError):
+                            logging.error(f"Invalid date format for monthly reminder {rid}: {target_date}")
 
             elif recurrence == 'every_other_day':
                 # Parse date to get next due date
                 try:
-                    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+                    # Optimistically check if date is today or past using string comparison if possible,
+                    # but for accurate date math we still need the object if it's due.
+                    # String comparison for YYYY-MM-DD works!
 
-                    # Logic:
-                    # 1. If date is in the past (< today), we missed it. Send and catch up.
-                    # 2. If date is today, check time.
-                    #    - If time is now or passed, send and update.
-
-                    is_past_date = target_dt.date() < now.date()
-                    is_due_today = (target_dt.date() == now.date()) and (target_time <= current_time_str)
+                    is_past_date = target_date < current_date_str
+                    is_due_today = (target_date == current_date_str) and (target_time <= current_time_str)
 
                     if is_past_date or is_due_today:
                         should_send = True
+
+                        target_dt = self.parse_date(target_date)
                         # Schedule next occurrence: add 2 days to the CURRENT target date
                         next_date = target_dt + timedelta(days=2)
                         next_date_str = next_date.strftime("%Y-%m-%d")
@@ -203,7 +220,7 @@ class ReminderBot(commands.Bot):
                         database.update_reminder_date(rid, next_date_str)
                         logging.info(f"Updated every_other_day reminder {rid} to next date: {next_date_str}")
 
-                except ValueError:
+                except (ValueError, TypeError):
                     logging.error(f"Invalid date format for reminder {rid}: {target_date}")
 
             elif recurrence == 'every_other_week':
