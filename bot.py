@@ -137,7 +137,7 @@ class ReminderBot(commands.Bot):
             translated_text = result["translatedText"]
 
             # Send reply
-            await message.reply(content=translated_text)
+            await message.reply(content=translated_text, allowed_mentions=discord.AllowedMentions.none())
             logging.info(f"Translated message {message_id} to {target_lang}")
         except Exception as e:
             # Revert cache lock if translation failed
@@ -244,7 +244,7 @@ class ReminderBot(commands.Bot):
                         case 'every_other_week': footer = "Every Other Week reminder"
                         case _: footer = "Reminder"
                     embed.set_footer(text=footer)
-                    await channel.send(content="@everyone", embed=embed, allowed_mentions=discord.AllowedMentions.all())
+                    await channel.send(content="@everyone", embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     async def delete_reminder_later(self, rid):
         await asyncio.sleep(5) # Wait a bit ensures message sends
