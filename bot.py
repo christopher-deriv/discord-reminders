@@ -12,7 +12,6 @@ import logging
 import database
 import giphy_client
 from google.cloud import translate_v2 as translate
-from google.auth.exceptions import DefaultCredentialsError
 from collections import deque
 
 # Configure logging
@@ -56,8 +55,8 @@ class ReminderBot(commands.Bot):
         try:
             self.translate_client = translate.Client()
             logging.info("Google Cloud Translate client initialized successfully.")
-        except DefaultCredentialsError:
-            logging.warning("Google Cloud Translate client failed to initialize due to missing credentials. Translation feature will not work.")
+        except Exception as e:
+            logging.warning(f"Google Cloud Translate client failed to initialize: {e}. Translation feature will not work.")
 
     async def setup_hook(self):
         database.init_db()
