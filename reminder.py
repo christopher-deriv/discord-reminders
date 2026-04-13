@@ -34,7 +34,8 @@ def send_reminder():
                     "url": GIF_URL
                 }
             }
-        ]
+        ],
+        "allowed_mentions": {"parse": []}
     }
 
     try:
