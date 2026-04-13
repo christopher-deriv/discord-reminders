@@ -6,7 +6,9 @@ A containerized Discord bot that allows authorized users to schedule recurring r
 
 - **Advanced Scheduling**:
     - **Daily**: Repeats every day at a specific time.
+    - **Every Other Day**: Repeats every 48 hours.
     - **Weekly**: Repeats on a specific day of the week.
+    - **Every Other Week**: Repeats every 14 days.
     - **Monthly**: Repeats on a specific day of the month.
     - **One-time**: Fires once and automatically deletes itself.
 - **Visuals**: Search and attach GIFs from Giphy directly within the setup flow.
@@ -60,7 +62,9 @@ Type `/remind-setup` and follow the interactive wizard:
 1.  **Select Channel**: Choose the channel where the bot should post.
 2.  **Select Frequency**:
     *   **Daily**: Repeating every day.
+    *   **Every Other Day**: Repeating every 48 hours.
     *   **Weekly**: Repeating every week (on the day of the date provided).
+    *   **Every Other Week**: Repeating every 14 days.
     *   **Monthly**: Repeating every month (on the day of the date provided).
     *   **One-time**: Runs once and then auto-deletes.
 3.  **Enter Details**:
