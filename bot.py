@@ -35,6 +35,7 @@ DEFAULT_CHANNEL_IDS = [int(x.strip()) for x in os.getenv("DEFAULT_CHANNEL_ID", "
 REMINDER_GIF_URL = os.getenv("REMINDER_GIF_URL")
 
 FLAG_LANG_MAP = {
+    "🇺🇸": "en", "🇬🇧": "en",
     "🇪🇸": "es", "🇫🇷": "fr", "🇩🇪": "de", "🇮🇹": "it", "🇵🇹": "pt",
     "🇨🇳": "zh-CN", "🇹🇼": "zh-TW", "🇯🇵": "ja", "🇰🇷": "ko", "🇮🇳": "hi",
     "🇧🇩": "bn", "🇹🇭": "th", "🇻🇳": "vi", "🇮🇩": "id", "🇲🇾": "ms",
