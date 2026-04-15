@@ -12,6 +12,7 @@ import logging
 import database
 import giphy_client
 import functools
+import calendar
 from google.cloud import translate_v2 as translate
 from collections import deque
 
@@ -273,6 +274,100 @@ class ReminderBot(commands.Bot):
         await self.wait_until_ready()
 
 bot = ReminderBot()
+
+def generate_calendar(reminders, year, month):
+    event_days = set()
+    event_list = []
+
+    first_day = datetime(year, month, 1, tzinfo=timezone.utc)
+    next_month = first_day.replace(day=28) + timedelta(days=4)
+    last_day = next_month - timedelta(days=next_month.day)
+
+    def _parse_date(date_str):
+        return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    for rid, event_name, target_time, channel_id, gif_url, recurrence, target_date in reminders:
+        days_for_this_event = []
+        if recurrence == 'daily':
+            days_for_this_event = list(range(1, last_day.day + 1))
+            event_list.append(f"• Daily: {event_name} at {target_time} UTC")
+        elif recurrence == 'once':
+            try:
+                dt = _parse_date(target_date)
+                if dt.year == year and dt.month == month:
+                    days_for_this_event.append(dt.day)
+                    event_list.append(f"• {dt.day:02d}: {event_name} at {target_time} UTC")
+            except Exception:
+                pass
+        elif recurrence == 'weekly':
+            try:
+                dt = _parse_date(target_date)
+                target_weekday = dt.weekday()
+                for d in range(1, last_day.day + 1):
+                    current_dt = datetime(year, month, d, tzinfo=timezone.utc)
+                    if current_dt.weekday() == target_weekday:
+                        days_for_this_event.append(d)
+                event_list.append(f"• Weekly ({dt.strftime('%A')}): {event_name} at {target_time} UTC")
+            except Exception:
+                pass
+        elif recurrence == 'monthly':
+            try:
+                dt = _parse_date(target_date)
+                if dt.day <= last_day.day:
+                    days_for_this_event.append(dt.day)
+                event_list.append(f"• Monthly (Day {dt.day}): {event_name} at {target_time} UTC")
+            except Exception:
+                pass
+        elif recurrence == 'every_other_day':
+            try:
+                dt = _parse_date(target_date)
+                curr = dt
+                while curr < first_day:
+                    curr += timedelta(days=2)
+                while curr <= last_day:
+                    if curr.month == month and curr.year == year:
+                        days_for_this_event.append(curr.day)
+                    curr += timedelta(days=2)
+                event_list.append(f"• Every other day: {event_name} at {target_time} UTC")
+            except Exception:
+                pass
+        elif recurrence == 'every_other_week':
+            try:
+                dt = _parse_date(target_date)
+                curr = dt
+                while curr < first_day:
+                    curr += timedelta(days=14)
+                while curr <= last_day:
+                    if curr.month == month and curr.year == year:
+                        days_for_this_event.append(curr.day)
+                    curr += timedelta(days=14)
+                event_list.append(f"• Every other week: {event_name} at {target_time} UTC")
+            except Exception:
+                pass
+
+        event_days.update(days_for_this_event)
+
+    cal = calendar.monthcalendar(year, month)
+    lines = []
+    lines.append(" Mo   Tu   We   Th   Fr   Sa   Su ")
+    for week in cal:
+        week_str = ""
+        for day in week:
+            if day == 0:
+                week_str += "     "
+            else:
+                if day in event_days:
+                    week_str += f"[{day:2}] "
+                else:
+                    week_str += f" {day:2}  "
+        lines.append(week_str.rstrip())
+
+    cal_str = "\n".join(lines)
+    events_str = "\n".join(event_list)
+    if not events_str:
+        events_str = "No upcoming events scheduled."
+
+    return f"```\n{calendar.month_name[month]} {year}\n{cal_str}\n```\n**Upcoming Events:**\n{events_str}"
 
 def is_authorized():
     async def predicate(interaction: discord.Interaction):
@@ -602,6 +697,20 @@ class EditView(discord.ui.View):
     def __init__(self, reminders):
         super().__init__()
         self.add_item(EditSelect(reminders))
+
+@bot.tree.command(name="event-calendar", description="View all scheduled events for this server in a calendar")
+async def event_calendar(interaction: discord.Interaction):
+    logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /event-calendar in guild {interaction.guild_id}")
+    reminders = database.get_all_reminders_full(interaction.guild_id)
+    if not reminders:
+        await interaction.response.send_message("No active reminders found for this server.", ephemeral=True)
+        return
+
+    now = datetime.now(timezone.utc)
+    calendar_text = generate_calendar(reminders, now.year, now.month)
+
+    embed = discord.Embed(title="Server Event Calendar", description=calendar_text, color=discord.Color.blue())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="remind-edit", description="View and manage active reminders")
 @is_authorized()
