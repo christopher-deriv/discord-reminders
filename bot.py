@@ -651,11 +651,15 @@ class EditSelect(discord.ui.Select):
                 except:
                     desc += " (Weekly)"
             elif recurrence == 'monthly':
-                 try:
+                try:
                     dt = datetime.strptime(target_date, "%Y-%m-%d")
                     day_num = dt.day
-                    desc += f" (Monthly on the {day_num})"  # Suffix logic omitted for brevity
-                 except:
+                    if 11 <= (day_num % 100) <= 13:
+                        suffix = 'th'
+                    else:
+                        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(day_num % 10, 'th')
+                    desc += f" (Monthly on the {day_num}{suffix})"
+                except:
                     desc += " (Monthly)"
             elif recurrence == 'every_other_day':
                 desc += f" (Every other day from {target_date})"
