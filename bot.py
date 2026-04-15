@@ -15,9 +15,9 @@ import functools
 import calendar
 from google.cloud import translate_v2 as translate
 from collections import deque
-from aiohttp import web
 import json
 import os
+import calendar_utils
 
 # Configure logging
 if not os.path.exists('logs'):
@@ -710,31 +710,51 @@ class EditView(discord.ui.View):
         super().__init__()
         self.add_item(EditSelect(reminders))
 
+class CalendarPaginationView(discord.ui.View):
+    def __init__(self, year, month, guild_id):
+        super().__init__(timeout=300)
+        self.year = year
+        self.month = month
+        self.guild_id = guild_id
+
+    async def update_calendar(self, interaction: discord.Interaction):
+        reminders = database.get_all_reminders_full(self.guild_id)
+        buf = calendar_utils.generate_calendar_image(self.year, self.month, reminders)
+        file = discord.File(fp=buf, filename="calendar.png")
+        await interaction.response.edit_message(attachments=[file], view=self)
+
+    @discord.ui.button(label="⬅️ Previous Month", style=discord.ButtonStyle.secondary)
+    async def prev_month(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.month -= 1
+        if self.month < 1:
+            self.month = 12
+            self.year -= 1
+        await self.update_calendar(interaction)
+
+    @discord.ui.button(label="Next Month ➡️", style=discord.ButtonStyle.secondary)
+    async def next_month(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.month += 1
+        if self.month > 12:
+            self.month = 1
+            self.year += 1
+        await self.update_calendar(interaction)
+
 @bot.tree.command(name="event-calendar", description="View all scheduled events for this server in an interactive calendar")
 async def event_calendar(interaction: discord.Interaction):
     logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /event-calendar in guild {interaction.guild_id}")
-
-    # Send a view with a link button. Normally for Discord Activities you would launch an app,
-    # but since this requires Discord App Config in the portal, we provide a button with the
-    # activity URL or a fallback instruction to click the Activity rocket ship icon.
-
-    view = discord.ui.View()
-    # Replace the URL below with your Cloudflare tunnel or Discord Activity URL
-    # Example for Activity: url="https://discord.com/activities/YOUR_CLIENT_ID"
-    # Example for web: url="https://bot.yourdomain.com/"
-    launch_btn = discord.ui.Button(
-        label="Launch Interactive Calendar",
-        style=discord.ButtonStyle.link,
-        url="https://discord.com/activities/1234567890" # Placeholder, configure in Discord Developer Portal
-    )
-    view.add_item(launch_btn)
-
-    embed = discord.Embed(
-        title="Server Event Calendar",
-        description="Click the button below to launch the interactive calendar UI.",
-        color=discord.Color.blue()
-    )
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    now = datetime.now(timezone.utc)
+    year, month = now.year, now.month
+    
+    reminders = database.get_all_reminders_full(interaction.guild_id)
+    buf = calendar_utils.generate_calendar_image(year, month, reminders)
+    
+    file = discord.File(fp=buf, filename="calendar.png")
+    view = CalendarPaginationView(year, month, interaction.guild_id)
+    
+    await interaction.followup.send(file=file, view=view, ephemeral=True)
 
 @bot.tree.command(name="remind-edit", description="View and manage active reminders")
 @is_authorized()
@@ -748,151 +768,11 @@ async def remind_edit(interaction: discord.Interaction):
     view = EditView(reminders)
     await interaction.response.send_message("Choose a reminder to edit or delete:", view=view, ephemeral=True)
 
-async def start_web_server():
-    app = web.Application()
-
-    # API Endpoints
-    async def handle_token(request):
-        try:
-            data = await request.json()
-            code = data.get("code")
-            # In a real app we would exchange 'code' for an access token via Discord's OAuth2 endpoint
-            # Since we just need the user/guild info and trust the client SDK for this local tunnel demo,
-            # we will return a mock token, but in production this must call Discord OAuth API.
-            return web.json_response({"access_token": "mock_token"})
-        except Exception as e:
-            return web.Response(status=500, text=str(e))
-
-    async def handle_reminders(request):
-        # We assume the user has hit the command in the bot first, but Discord embedded apps
-        # normally identify user/guild via the token. Since we're using a mock token, we'll
-        # just return all reminders globally or a hardcoded guild for demo.
-        # A real implementation requires decoding the Discord access_token.
-        # Let's extract year and month
-        try:
-            year = int(request.query.get("year", datetime.now().year))
-            month = int(request.query.get("month", datetime.now().month))
-
-            # In a real app we'd get the guild_id from the user's auth token here
-            # Since we are using a mock token, let's just fetch all reminders for now or default to 123
-            # To be safer we should require the client to pass guild_id or fetch it from token
-            reminders = database.get_reminders() # Defaulting to all for demo purposes, but in reality should use get_all_reminders_full(guild_id)
-
-            event_days = {} # day -> list of dicts
-            colors = ['#ff4d4d', '#4da6ff', '#bf4dff', '#4dff4d', '#ffa64d', '#ff66b3', '#33cccc']
-
-            first_day = datetime(year, month, 1, tzinfo=timezone.utc)
-            next_month = first_day.replace(day=28) + timedelta(days=4)
-            last_day = next_month - timedelta(days=next_month.day)
-
-            def _parse_date(date_str):
-                return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-
-            for i, (rid, event_name, target_time, channel_id, gif_url, recurrence, target_date) in enumerate(reminders):
-                color = colors[i % len(colors)]
-                days_for_this_event = []
-                if recurrence == 'daily':
-                    days_for_this_event = list(range(1, last_day.day + 1))
-                elif recurrence == 'once':
-                    try:
-                        dt = _parse_date(target_date)
-                        if dt.year == year and dt.month == month:
-                            days_for_this_event.append(dt.day)
-                    except Exception:
-                        pass
-                elif recurrence == 'weekly':
-                    try:
-                        dt = _parse_date(target_date)
-                        target_weekday = dt.weekday()
-                        for d in range(1, last_day.day + 1):
-                            current_dt = datetime(year, month, d, tzinfo=timezone.utc)
-                            if current_dt.weekday() == target_weekday:
-                                days_for_this_event.append(d)
-                    except Exception:
-                        pass
-                elif recurrence == 'monthly':
-                    try:
-                        dt = _parse_date(target_date)
-                        if dt.day <= last_day.day:
-                            days_for_this_event.append(dt.day)
-                    except Exception:
-                        pass
-                elif recurrence == 'every_other_day':
-                    try:
-                        dt = _parse_date(target_date)
-                        curr = dt
-                        while curr < first_day:
-                            curr += timedelta(days=2)
-                        while curr <= last_day:
-                            if curr.month == month and curr.year == year:
-                                days_for_this_event.append(curr.day)
-                            curr += timedelta(days=2)
-                    except Exception:
-                        pass
-                elif recurrence == 'every_other_week':
-                    try:
-                        dt = _parse_date(target_date)
-                        curr = dt
-                        while curr < first_day:
-                            curr += timedelta(days=14)
-                        while curr <= last_day:
-                            if curr.month == month and curr.year == year:
-                                days_for_this_event.append(curr.day)
-                            curr += timedelta(days=14)
-                    except Exception:
-                        pass
-
-                for day in days_for_this_event:
-                    date_str = f"{year}-{month:02d}-{day:02d}"
-                    if date_str not in event_days:
-                        event_days[date_str] = []
-                    event_days[date_str].append({
-                        'title': event_name,
-                        'time': target_time + " UTC",
-                        'color': color
-                    })
-
-            return web.json_response({"events": event_days})
-
-        except Exception as e:
-            return web.Response(status=500, text=str(e))
-
-    app.router.add_post('/api/token', handle_token)
-    app.router.add_get('/api/reminders', handle_reminders)
-
-    # Serve static frontend (React dist)
-    dist_path = os.path.join(os.path.dirname(__file__), 'client', 'dist')
-
-    if os.path.exists(dist_path):
-        # Static serving requires explicit index.html route for the root
-        async def index(request):
-            index_path = os.path.join(dist_path, 'index.html')
-            if not os.path.exists(index_path):
-                return web.Response(text="Frontend not built", status=404)
-            return web.FileResponse(index_path)
-
-        app.router.add_get('/', index)
-
-        assets_path = os.path.join(dist_path, 'assets')
-        if os.path.exists(assets_path):
-            app.router.add_static('/assets', path=assets_path, name='assets')
-
-        app.router.add_static('/', path=dist_path, name='static')
-    else:
-        logging.warning(f"Frontend dist directory not found at {dist_path}. UI will not be served.")
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 3000)
-    await site.start()
-    logging.info("Web server started on http://0.0.0.0:3000")
-
 async def main():
     if not TOKEN or TOKEN == "your_bot_token_here":
         logging.error("DISCORD_TOKEN not set in .env")
         return
 
-    asyncio.create_task(start_web_server())
     await bot.start(TOKEN)
 
 if __name__ == "__main__":
