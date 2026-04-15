@@ -85,6 +85,11 @@ class ReminderBot(commands.Bot):
         try:
             synced = await self.tree.sync()
             logging.info(f"Synced {len(synced)} command(s)")
+        except discord.HTTPException as e:
+            if "50240" in str(e):
+                logging.warning(f"Skipping command sync: {e} (This is normal if an Activity Entry Point exists in the portal)")
+            else:
+                logging.error(f"Failed to sync commands: {e}")
         except Exception as e:
             logging.error(f"Failed to sync commands: {e}")
 
@@ -854,13 +859,23 @@ async def start_web_server():
     # Serve static frontend (React dist)
     dist_path = os.path.join(os.path.dirname(__file__), 'client', 'dist')
 
-    # Static serving requires explicit index.html route for the root
-    async def index(request):
-        return web.FileResponse(os.path.join(dist_path, 'index.html'))
+    if os.path.exists(dist_path):
+        # Static serving requires explicit index.html route for the root
+        async def index(request):
+            index_path = os.path.join(dist_path, 'index.html')
+            if not os.path.exists(index_path):
+                return web.Response(text="Frontend not built", status=404)
+            return web.FileResponse(index_path)
 
-    app.router.add_get('/', index)
-    app.router.add_static('/assets', path=os.path.join(dist_path, 'assets'), name='assets')
-    app.router.add_static('/', path=dist_path, name='static')
+        app.router.add_get('/', index)
+
+        assets_path = os.path.join(dist_path, 'assets')
+        if os.path.exists(assets_path):
+            app.router.add_static('/assets', path=assets_path, name='assets')
+
+        app.router.add_static('/', path=dist_path, name='static')
+    else:
+        logging.warning(f"Frontend dist directory not found at {dist_path}. UI will not be served.")
 
     runner = web.AppRunner(app)
     await runner.setup()
