@@ -401,7 +401,7 @@ class GifSelect(discord.ui.Select):
     def __init__(self, gifs):
         self.gifs = gifs # List of (url, title)
         options = [
-            discord.SelectOption(label=title[:100], value=str(index)) 
+            discord.SelectOption(label=(title.strip() if title and title.strip() else f"GIF Option {index+1}")[:100], value=str(index)) 
             for index, (url, title) in enumerate(gifs)
         ]
         super().__init__(placeholder="Select a GIF to preview...", options=options)
