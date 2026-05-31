@@ -221,15 +221,12 @@ class GiftCog(commands.Cog):
             player_data = res["data"]
             nickname = player_data.get("nickname", "Unknown")
             kid = player_data.get("kid", "N/A")
-            stove_lv = player_data.get("stove_lv", "N/A")
-
             success = database.register_player(interaction.user.id, interaction.guild_id, player_id, nickname)
             if success:
                 await interaction.followup.send(
                     f"[+] Player ID **{player_id}** successfully registered!\n"
                     f"* Nickname: **{nickname}**\n"
-                    f"* Kingdom: **#{kid}**\n"
-                    f"* Stove Level: **{stove_lv}**",
+                    f"* Kingdom: **#{kid}**",
                     ephemeral=True
                 )
             else:
