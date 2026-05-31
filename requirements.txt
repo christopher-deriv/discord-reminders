@@ -3,3 +3,5 @@ python-dotenv
 aiohttp
 google-cloud-translate
 Pillow
+numpy
+onnxruntime
