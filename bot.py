@@ -56,13 +56,25 @@ class ReminderBot(commands.Bot):
     async def on_ready(self):
         logging.info(f'Logged in as {self.user} (ID: {self.user.id})')
         try:
+            # Try global command tree sync first
             synced = await self.tree.sync()
-            logging.info(f"Synced {len(synced)} command(s)")
+            logging.info(f"Synced {len(synced)} command(s) globally.")
         except discord.HTTPException as e:
             if "50240" in str(e):
-                logging.warning(f"Skipping command sync: {e} (Normal if an Activity Entry Point exists in the portal)")
+                logging.warning("Global sync blocked by Developer Portal Activity Entry Point constraint (Error 50240).")
+                logging.info("Attempting automatic fallback: Syncing commands directly to all connected guilds...")
+                
+                # Fallback: Copy global commands to all guilds the bot is in and sync them directly.
+                # Guild commands register instantly and bypass the global Activity Entry Point restriction completely.
+                for guild in self.guilds:
+                    try:
+                        self.tree.copy_global_to(guild=guild)
+                        synced = await self.tree.sync(guild=guild)
+                        logging.info(f"Successfully synced {len(synced)} guild command(s) to server: '{guild.name}' (ID: {guild.id})")
+                    except Exception as guild_err:
+                        logging.error(f"Failed to sync guild commands to server '{guild.name}': {guild_err}")
             else:
-                logging.error(f"Failed to sync commands: {e}")
+                logging.error(f"Failed to sync commands globally: {e}")
         except Exception as e:
             logging.error(f"Failed to sync commands: {e}")
 
