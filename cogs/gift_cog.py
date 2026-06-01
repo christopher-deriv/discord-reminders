@@ -44,8 +44,10 @@ class GiftCog(commands.Cog):
         """
         logging.info("Starting background gift code auto-redemption cycle...")
         
-        # 1. Fetch active codes from DB and resiliently from public API
+        # 1. Fetch active codes from DB, resiliently from API, and scrape from kingshotwiki.com
         active_codes = set(database.get_active_codes())
+        
+        # A. Poll community API
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://kingshot.net/api/gift-codes", timeout=10) as response:
@@ -61,7 +63,24 @@ class GiftCog(commands.Cog):
                            for code in data["codes"]:
                                active_codes.add(code.upper().strip())
         except Exception as e:
-            logging.warning(f"Resilient poll: Public API for gift codes failed ({e}). Relying solely on local DB codes.")
+            logging.warning(f"Resilient poll: Public API for gift codes failed ({e}).")
+
+        # B. Scrape from Kingshot Wiki
+        try:
+            async with aiohttp.ClientSession() as session:
+                wiki_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                async with session.get("https://kingshotwiki.com/giftcodes/", headers=wiki_headers, timeout=10) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        import re
+                        found_codes = re.findall(r'class="code">([^<]+)</span>', html)
+                        for code in found_codes:
+                            code_clean = code.upper().strip()
+                            if code_clean:
+                                active_codes.add(code_clean)
+                                logging.info(f"Wiki Scraper: Found active code '{code_clean}'")
+        except Exception as e:
+            logging.warning(f"Resilient poll: Scoping kingshotwiki.com for gift codes failed ({e}).")
 
         if not active_codes:
             logging.info("No active gift codes to process in this cycle.")
