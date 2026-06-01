@@ -118,6 +118,13 @@ class GiftCog(commands.Cog):
                     redemptions_attempted = True
                     player_failed = False
 
+                    # Always verify/login the player first to establish the API session
+                    verify_res = await client.verify_player(player_id)
+                    if verify_res.get("code") != 0:
+                        logging.warning(f"Verify/Login failed for player {player_id}: {verify_res.get('msg')}")
+                        failure_count += len(unclaimed_codes)
+                        continue
+
                     for c_idx, code in enumerate(unclaimed_codes):
                         # Apply inter-code delay between individual code attempts for the same player
                         if c_idx > 0:
@@ -295,7 +302,14 @@ class GiftCog(commands.Cog):
                     await asyncio.sleep(delay)
 
                 redemptions_attempted = True
-                
+
+                # Always verify/login the player first to establish the API session
+                verify_res = await client.verify_player(player_id)
+                if verify_res.get("code") != 0:
+                    logging.warning(f"Verify/Login failed for player {player_id}: {verify_res.get('msg')}")
+                    failure_count += 1
+                    continue
+
                 res = await client.redeem_with_captcha_solver(player_id, code_clean)
                 res_code = res.get("code")
                 err_code = res.get("err_code")
