@@ -220,3 +220,17 @@ def get_active_codes():
     except Exception as e:
         print(f"Database error (get_active_codes): {e}")
         return []
+
+def get_redemption_history(player_id):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT gift_code, redeemed_at FROM redemption_history
+                WHERE player_id = ?
+                ORDER BY redeemed_at DESC
+            """, (player_id,))
+            return cursor.fetchall()
+    except Exception as e:
+        print(f"Database error (get_redemption_history): {e}")
+        return []

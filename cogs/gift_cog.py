@@ -183,7 +183,8 @@ class GiftCog(commands.Cog):
                         continue
 
                 # 4. Consolidated Reporting for this guild
-                if redemptions_attempted:
+                # Only post if at least one code was successfully redeemed (success_count > 0) to prevent flooding.
+                if redemptions_attempted and success_count > 0:
                     await self.post_summary_report(guild_id, len(active_codes), len(players), success_count, failure_count, rate_limited)
 
     async def post_summary_report(self, guild_id, total_codes, total_players, success_count, failure_count, rate_limited):
@@ -279,6 +280,41 @@ class GiftCog(commands.Cog):
 
         player_list = "\n".join([f"• **{name}** (ID: `{pid}`)" for pid, name in players])
         await interaction.response.send_message(f"### Your Registered KingShot Players:\n{player_list}", ephemeral=True)
+
+    @app_commands.command(name="my-redemptions", description="Check which gift codes have been successfully redeemed for your accounts")
+    async def my_redemptions(self, interaction: discord.Interaction):
+        logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /my-redemptions")
+        
+        players = database.get_registered_players(interaction.user.id, interaction.guild_id)
+        if not players:
+            await interaction.response.send_message("You have no registered players in this guild.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="🎁 Your Gift Code Redemptions",
+            description="Here is the redemption history for your registered accounts:",
+            color=discord.Color.green(),
+            timestamp=discord.utils.utcnow()
+        )
+
+        for pid, name in players:
+            history = database.get_redemption_history(pid)
+            if history:
+                lines = []
+                for code, redeemed_at in history:
+                    dt_str = redeemed_at.split(".")[0] if "." in redeemed_at else redeemed_at
+                    lines.append(f"• ` {code} ` (Claimed: {dt_str} UTC)")
+                val_text = "\n".join(lines)
+            else:
+                val_text = "*No gift codes redeemed yet.*"
+            
+            embed.add_field(
+                name=f"👤 Player: {name} (ID: {pid})",
+                value=val_text,
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="add-gift-code", description="Register a gift code for automated polling and redemption")
     @is_authorized()
