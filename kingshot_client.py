@@ -200,6 +200,13 @@ class KingShotClient:
     async def get_config(self) -> dict:
         return await self.make_post_request("gift_code_config", {})
 
+    async def fetch_captcha(self, fid: str) -> dict:
+        payload = {
+            "fid": str(fid),
+            "init": "0"
+        }
+        return await self.make_post_request("captcha", payload)
+
     async def redeem_code(self, fid: str, cdk: str, captcha_code: str = "") -> dict:
         payload = {
             "fid": str(fid),
@@ -216,16 +223,20 @@ class KingShotClient:
         
         code = res.get("code")
         err_code = res.get("err_code")
-        data = res.get("data") or {}
+        msg = str(res.get("msg", "")).upper()
         
-        # 40007 is the standard Century Games CAPTCHA required code
-        is_captcha = (code == 1 and err_code == 40007) or "captcha_img" in data
+        # 40007 is the standard Century Games CAPTCHA required code, or TIME ERROR message
+        is_captcha = (code == 1 and err_code == 40007) or "TIME ERROR" in msg or "CAPTCHA" in msg
         
         if is_captcha:
             if self.solver.enabled:
-                captcha_base64 = data.get("captcha_img") or res.get("captcha_img")
+                logging.info(f"CAPTCHA challenge detected for player {fid}. Fetching CAPTCHA image...")
+                captcha_res = await self.fetch_captcha(fid)
+                captcha_data = captcha_res.get("data") or {}
+                captcha_base64 = captcha_data.get("img")
+                
                 if captcha_base64:
-                    logging.info(f"CAPTCHA challenge detected for player {fid}. Running ML solver...")
+                    logging.info(f"CAPTCHA image fetched successfully. Running ML solver...")
                     # Run CPU inference in thread to keep event loop fully non-blocking
                     solved_code = await asyncio.to_thread(self.solver.solve, captcha_base64)
                     
@@ -235,7 +246,8 @@ class KingShotClient:
                     else:
                         logging.warning(f"ML Solver returned empty CAPTCHA string. Skipping player {fid}.")
                 else:
-                    logging.warning(f"CAPTCHA required but no captcha_img found in response. Skipping player {fid}.")
+                    err_msg = captcha_res.get("msg", "Unknown error")
+                    logging.warning(f"Failed to fetch CAPTCHA image (msg: {err_msg}). Skipping player {fid}.")
             else:
                 logging.warning(f"CAPTCHA required for player {fid} but ML Solver is disabled. Skipping player.")
                 
