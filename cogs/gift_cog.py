@@ -32,6 +32,7 @@ def is_authorized():
 class GiftCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.is_first_run = True
         self.poll_gift_codes.start()
 
     def cog_unload(self):
@@ -42,6 +43,11 @@ class GiftCog(commands.Cog):
         """
         Background task running every 2 hours to poll and auto-redeem active gift codes.
         """
+        if self.is_first_run:
+            self.is_first_run = False
+            logging.info("Skipping initial auto-redemption poll on startup.")
+            return
+
         logging.info("Starting background gift code auto-redemption cycle...")
         
         # 1. Fetch active codes from DB, resiliently from API, and scrape from kingshotwiki.com
@@ -164,26 +170,38 @@ class GiftCog(commands.Cog):
                         # Century Games returns code=0 for success, code=1 with err_code=40008 for already claimed
                         is_success = (res_code == 0)
                         is_already_claimed = (res_code == 1 and err_code == 40008)
+                        
+                        msg_str = str(res.get("msg", "")).upper()
+                        is_same_type = "SAME TYPE" in msg_str or err_code == 40009
+                        
+                        is_captcha = (res_code == 1 and err_code == 40007) or "TIME ERROR" in msg_str or "CAPTCHA" in msg_str
 
-                        if is_success or is_already_claimed:
+                        if is_success:
                             success_count += 1
                             database.add_redemption_record(player_id, code)
-                        else:
+                        elif is_already_claimed or is_same_type:
+                            # Record already claimed or same-type restrictions in DB so we never check them again
+                            database.add_redemption_record(player_id, code)
+                        elif is_captcha:
                             failure_count += 1
                             player_failed = True
+                            logging.warning(f"Redemption failed: CAPTCHA required ({res.get('msg')}) for player {player_id}")
+                            break # Blocked by CAPTCHA, skip other codes for this player
+                        else:
+                            failure_count += 1
                             logging.warning(f"Redemption failed: {res.get('msg')} for player {player_id}")
 
                     if rate_limited:
                         logging.error("IP rate limit hit. Aborting background redemption queue for this cycle.")
                         break # Abort players loop for this guild
 
-                    # If this specific player failed, we skip their other attempts and move to the next player
+                    # If this specific player failed due to captcha/rate limit, we skip and log
                     if player_failed:
                         logging.info(f"Skipping further attempts for player {player_id} due to failure/captcha.")
                         continue
 
                 # 4. Consolidated Reporting for this guild
-                # Only post if at least one code was successfully redeemed (success_count > 0) to prevent flooding.
+                # Only post if at least one code was actually successfully redeemed (success_count > 0) to prevent flooding.
                 if redemptions_attempted and success_count > 0:
                     await self.post_summary_report(guild_id, len(active_codes), len(players), success_count, failure_count, rate_limited)
 
@@ -375,8 +393,11 @@ class GiftCog(commands.Cog):
 
                 is_success = (res_code == 0)
                 is_already_claimed = (res_code == 1 and err_code == 40008)
+                
+                msg_str = str(res.get("msg", "")).upper()
+                is_same_type = "SAME TYPE" in msg_str or err_code == 40009
 
-                if is_success or is_already_claimed:
+                if is_success or is_already_claimed or is_same_type:
                     success_count += 1
                     database.add_redemption_record(player_id, code_clean)
                 else:

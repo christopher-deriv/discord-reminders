@@ -38,6 +38,7 @@ class KingShotMLSolver:
         self.model_path = model_path
         self.session = None
         self.enabled = False
+        self.model_metadata = None
         
         if not HAS_ML_DEPS:
             logging.warning("ML Solver disabled: missing required libraries (onnxruntime, numpy, Pillow).")
@@ -48,19 +49,28 @@ class KingShotMLSolver:
             return
             
         try:
+            # Load metadata if exists
+            metadata_path = model_path.replace(".onnx", "_metadata.json")
+            if os.path.exists(metadata_path):
+                import json
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    self.model_metadata = json.load(f)
+                    
             # Initialize ONNX Inference session on CPU
             self.session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
             self.enabled = True
             
             # Analyze input layers dynamically
             self.input_name = self.session.get_inputs()[0].name
-            self.input_shape = self.session.get_inputs()[0].shape
             
-            # Standard dimensions fallback if shape is dynamic
-            self.channels = self.input_shape[1] if len(self.input_shape) >= 4 and isinstance(self.input_shape[1], int) else 1
-            self.height = self.input_shape[2] if len(self.input_shape) >= 4 and isinstance(self.input_shape[2], int) else 48
-            self.width = self.input_shape[3] if len(self.input_shape) >= 4 and isinstance(self.input_shape[3], int) else 130
-            
+            if self.model_metadata:
+                self.height, self.width = self.model_metadata['input_shape'][1:3]
+                self.channels = self.model_metadata['input_shape'][0] if len(self.model_metadata['input_shape']) == 3 else 1
+            else:
+                self.channels = 1
+                self.height = 40
+                self.width = 150
+                
             logging.info(f"ML Solver initialized with model: {model_path}. Dimensions: channels={self.channels}, height={self.height}, width={self.width}")
         except Exception as e:
             logging.error(f"ML Solver failed to load session: {e}")
@@ -86,11 +96,19 @@ class KingShotMLSolver:
                 img = img.convert("RGB")
                 
             # Resize to expected dimensions
-            img = img.resize((self.width, self.height))
+            img = img.resize((self.width, self.height), Image.Resampling.LANCZOS)
             
-            # Convert to numpy float32 array and normalize [0, 1]
-            img_arr = np.array(img, dtype=np.float32) / 255.0
+            # Convert to numpy float32 array
+            img_arr = np.array(img, dtype=np.float32)
             
+            # Normalize using metadata
+            if self.model_metadata and 'normalization' in self.model_metadata:
+                mean = self.model_metadata['normalization']['mean'][0]
+                std = self.model_metadata['normalization']['std'][0]
+                img_arr = (img_arr / 255.0 - mean) / std
+            else:
+                img_arr = (img_arr / 127.5) - 1.0
+                
             # Restructure shape to [batch, channels, height, width]
             if self.channels == 1:
                 img_arr = np.expand_dims(img_arr, axis=0) # [1, height, width]
@@ -101,33 +119,22 @@ class KingShotMLSolver:
             
             # Run inference
             outputs = self.session.run(None, {self.input_name: img_tensor})
-            output_tensor = outputs[0]
             
-            # Alphanumeric lowercase vocabulary (standard for custom Century Games CAPTCHA models)
-            vocab = "0123456789abcdefghijklmnopqrstuvwxyz"
+            # Decode output using metadata map
             predicted_text = ""
-            
-            if len(output_tensor.shape) == 3:
-                # Format A: [1, seq_len, classes]
-                if output_tensor.shape[0] == 1:
-                    seq_len = output_tensor.shape[1]
-                    for i in range(seq_len):
-                        char_probs = output_tensor[0, i]
-                        char_idx = np.argmax(char_probs)
-                        if char_idx < len(vocab):
-                            predicted_text += vocab[char_idx]
-                # Format B: CTC [time_steps, 1, classes]
-                else:
-                    time_steps = output_tensor.shape[0]
-                    prev_char_idx = -1
-                    for t in range(time_steps):
-                        char_probs = output_tensor[t, 0]
-                        char_idx = np.argmax(char_probs)
-                        blank_token_idx = len(char_probs) - 1
-                        if char_idx != blank_token_idx and char_idx != prev_char_idx:
-                            if char_idx < len(vocab):
-                                predicted_text += vocab[char_idx]
-                        prev_char_idx = char_idx
+            if self.model_metadata and 'idx_to_char' in self.model_metadata:
+                idx_to_char = self.model_metadata['idx_to_char']
+                for pos in range(4):
+                    char_probs = outputs[pos][0]
+                    predicted_idx = np.argmax(char_probs)
+                    predicted_text += idx_to_char[str(predicted_idx)]
+            else:
+                vocab = "ABCDEFGHIJKLMNPQRSTUVWXYZ23456789"
+                for pos in range(4):
+                    char_probs = outputs[pos][0]
+                    predicted_idx = np.argmax(char_probs)
+                    if predicted_idx < len(vocab):
+                        predicted_text += vocab[predicted_idx]
                         
             # Format output to alphanumeric characters only
             predicted_text = "".join([c for c in predicted_text if c.isalnum()]).strip()
