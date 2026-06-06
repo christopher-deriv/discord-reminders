@@ -62,12 +62,12 @@ class GiftCog(commands.Cog):
                         if isinstance(data, list):
                             for item in data:
                                 if isinstance(item, dict) and "code" in item:
-                                    active_codes.add(item["code"].upper().strip())
+                                    active_codes.add(item["code"].strip())
                                 elif isinstance(item, str):
-                                    active_codes.add(item.upper().strip())
+                                    active_codes.add(item.strip())
                         elif isinstance(data, dict) and "codes" in data:
                            for code in data["codes"]:
-                               active_codes.add(code.upper().strip())
+                               active_codes.add(code.strip())
         except Exception as e:
             logging.warning(f"Resilient poll: Public API for gift codes failed ({e}).")
 
@@ -81,7 +81,7 @@ class GiftCog(commands.Cog):
                         import re
                         found_codes = re.findall(r'class="code">([^<]+)</span>', html)
                         for code in found_codes:
-                            code_clean = code.upper().strip()
+                            code_clean = code.strip()
                             if code_clean:
                                 active_codes.add(code_clean)
                                 logging.info(f"Wiki Scraper: Found active code '{code_clean}'")
@@ -337,7 +337,7 @@ class GiftCog(commands.Cog):
     @app_commands.command(name="add-gift-code", description="Register a gift code for automated polling and redemption")
     @is_authorized()
     async def add_gift_code(self, interaction: discord.Interaction, gift_code: str):
-        code_clean = gift_code.upper().strip()
+        code_clean = gift_code.strip()
         logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /add-gift-code with code {code_clean}")
         
         success = database.add_active_code(code_clean)
@@ -349,7 +349,7 @@ class GiftCog(commands.Cog):
     @app_commands.command(name="redeem-force", description="Force immediate redemption of a code for all players in this guild")
     @is_authorized()
     async def redeem_force(self, interaction: discord.Interaction, gift_code: str):
-        code_clean = gift_code.upper().strip()
+        code_clean = gift_code.strip()
         logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /redeem-force for code {code_clean}")
         await interaction.response.defer(ephemeral=True)
 
