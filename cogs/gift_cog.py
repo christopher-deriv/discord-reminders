@@ -51,7 +51,9 @@ class GiftCog(commands.Cog):
         logging.info("Starting background gift code auto-redemption cycle...")
         
         # 1. Fetch active codes from DB, resiliently from API, and scrape from kingshotwiki.com
-        active_codes = set(database.get_active_codes())
+        db_codes = database.get_active_codes()
+        logging.info(f"Database: Found active codes: {db_codes}")
+        active_codes = set(db_codes)
         
         # A. Poll community API
         try:
@@ -59,15 +61,21 @@ class GiftCog(commands.Cog):
                 async with session.get("https://kingshot.net/api/gift-codes", timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
+                        api_codes = []
                         if isinstance(data, list):
                             for item in data:
                                 if isinstance(item, dict) and "code" in item:
-                                    active_codes.add(item["code"].strip())
+                                    api_codes.append(item["code"].strip())
                                 elif isinstance(item, str):
-                                    active_codes.add(item.strip())
+                                    api_codes.append(item.strip())
                         elif isinstance(data, dict) and "codes" in data:
                            for code in data["codes"]:
-                               active_codes.add(code.strip())
+                               api_codes.append(code.strip())
+                        
+                        if api_codes:
+                            logging.info(f"Public API: Found active codes: {api_codes}")
+                            for c in api_codes:
+                                active_codes.add(c)
         except Exception as e:
             logging.warning(f"Resilient poll: Public API for gift codes failed ({e}).")
 
@@ -80,17 +88,22 @@ class GiftCog(commands.Cog):
                         html = await response.text()
                         import re
                         found_codes = re.findall(r'class="code">([^<]+)</span>', html)
+                        wiki_codes = []
                         for code in found_codes:
                             code_clean = code.strip()
                             if code_clean:
+                                wiki_codes.append(code_clean)
                                 active_codes.add(code_clean)
-                                logging.info(f"Wiki Scraper: Found active code '{code_clean}'")
+                        if wiki_codes:
+                            logging.info(f"Wiki Scraper: Found active codes: {wiki_codes}")
         except Exception as e:
             logging.warning(f"Resilient poll: Scoping kingshotwiki.com for gift codes failed ({e}).")
 
         if not active_codes:
             logging.info("No active gift codes to process in this cycle.")
             return
+
+        logging.info(f"Consolidated active codes for this cycle: {list(active_codes)}")
 
         # 2. Query all registered players from the SQLite database
         all_players = []
