@@ -205,7 +205,7 @@ class KingShotClient:
             "fid": str(fid),
             "init": "0"
         }
-        return await self.make_post_request("captcha", payload)
+        return await self.make_post_request("get_captcha", payload)
 
     async def redeem_code(self, fid: str, cdk: str, captcha_code: str = "") -> dict:
         payload = {
