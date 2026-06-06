@@ -140,6 +140,7 @@ class GiftCog(commands.Cog):
                 failure_count = 0
                 rate_limited = False
                 redemptions_attempted = False
+                successfully_redeemed_codes = set()
 
                 for p_idx, (discord_id, player_id, player_name) in enumerate(players):
                     # Filter codes that this specific player has not yet redeemed
@@ -191,6 +192,7 @@ class GiftCog(commands.Cog):
 
                         if is_success:
                             success_count += 1
+                            successfully_redeemed_codes.add(code)
                             database.add_redemption_record(player_id, code)
                         elif is_already_claimed or is_same_type:
                             # Record already claimed or same-type restrictions in DB so we never check them again
@@ -216,9 +218,17 @@ class GiftCog(commands.Cog):
                 # 4. Consolidated Reporting for this guild
                 # Only post if at least one code was actually successfully redeemed (success_count > 0) to prevent flooding.
                 if redemptions_attempted and success_count > 0:
-                    await self.post_summary_report(guild_id, len(active_codes), len(players), success_count, failure_count, rate_limited)
+                    await self.post_summary_report(
+                        guild_id, 
+                        len(active_codes), 
+                        len(players), 
+                        success_count, 
+                        failure_count, 
+                        rate_limited, 
+                        list(successfully_redeemed_codes)
+                    )
 
-    async def post_summary_report(self, guild_id, total_codes, total_players, success_count, failure_count, rate_limited):
+    async def post_summary_report(self, guild_id, total_codes, total_players, success_count, failure_count, rate_limited, redeemed_codes):
         """
         Sends a single, consolidated summary report to the configured channel to prevent spam.
         """
@@ -252,6 +262,11 @@ class GiftCog(commands.Cog):
         embed.add_field(name="Successes (Claimed)", value=f"✅ {success_count}", inline=True)
         embed.add_field(name="Failed / Skipped", value=f"❌ {failure_count}", inline=True)
         embed.add_field(name="Rate Limited (HTTP 429)", value="⚠️ Yes (Aborted)" if rate_limited else "No", inline=True)
+        
+        if redeemed_codes:
+            codes_list_str = ", ".join([f"`{c}`" for c in redeemed_codes])
+            embed.add_field(name="Redeemed Codes", value=codes_list_str, inline=False)
+            
         embed.set_footer(text="Failed accounts will be retried automatically in the next background cycle.")
 
         try:
