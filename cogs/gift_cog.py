@@ -193,18 +193,22 @@ class GiftCog(commands.Cog):
                         if is_success:
                             success_count += 1
                             successfully_redeemed_codes.add(code)
+                            logging.info(f"Auto-redeem SUCCESS: Code '{code}' for player '{player_name}' ({player_id})")
                             database.add_redemption_record(player_id, code)
-                        elif is_already_claimed or is_same_type:
-                            # Record already claimed or same-type restrictions in DB so we never check them again
+                        elif is_already_claimed:
+                            logging.info(f"Auto-redeem ALREADY CLAIMED: Code '{code}' for player '{player_name}' ({player_id})")
+                            database.add_redemption_record(player_id, code)
+                        elif is_same_type:
+                            logging.info(f"Auto-redeem SAME TYPE RESTRICTION: Code '{code}' for player '{player_name}' ({player_id})")
                             database.add_redemption_record(player_id, code)
                         elif is_captcha:
                             failure_count += 1
                             player_failed = True
-                            logging.warning(f"Redemption failed: CAPTCHA required ({res.get('msg')}) for player {player_id}")
+                            logging.warning(f"Auto-redeem FAILED: CAPTCHA required ({res.get('msg')}) for player {player_id}")
                             break # Blocked by CAPTCHA, skip other codes for this player
                         else:
                             failure_count += 1
-                            logging.warning(f"Redemption failed: {res.get('msg')} for player {player_id}")
+                            logging.warning(f"Auto-redeem FAILED: {res.get('msg')} for player {player_id}")
 
                     if rate_limited:
                         logging.error("IP rate limit hit. Aborting background redemption queue for this cycle.")
@@ -403,6 +407,7 @@ class GiftCog(commands.Cog):
                     await asyncio.sleep(delay)
 
                 redemptions_attempted = True
+                logging.info(f"Force-redeem: Attempting code '{code_clean}' for player '{player_name}' ({player_id}) [{p_idx + 1}/{len(players)}]")
 
                 # Always verify/login the player first to establish the API session
                 verify_res = await client.verify_player(player_id)
@@ -417,6 +422,7 @@ class GiftCog(commands.Cog):
 
                 if res_code == 429:
                     rate_limited = True
+                    logging.warning(f"Force-redeem: Rate limited on player '{player_name}' ({player_id}). Aborting force redemption loop.")
                     break
 
                 is_success = (res_code == 0)
@@ -425,12 +431,21 @@ class GiftCog(commands.Cog):
                 msg_str = str(res.get("msg", "")).upper()
                 is_same_type = "SAME TYPE" in msg_str or err_code == 40009
 
-                if is_success or is_already_claimed or is_same_type:
+                if is_success:
                     success_count += 1
+                    logging.info(f"Force-redeem SUCCESS: Code '{code_clean}' for player '{player_name}' ({player_id})")
+                    database.add_redemption_record(player_id, code_clean)
+                elif is_already_claimed:
+                    success_count += 1
+                    logging.info(f"Force-redeem ALREADY CLAIMED: Code '{code_clean}' for player '{player_name}' ({player_id})")
+                    database.add_redemption_record(player_id, code_clean)
+                elif is_same_type:
+                    success_count += 1
+                    logging.info(f"Force-redeem SAME TYPE RESTRICTION: Code '{code_clean}' for player '{player_name}' ({player_id})")
                     database.add_redemption_record(player_id, code_clean)
                 else:
                     failure_count += 1
-                    logging.warning(f"Force redeem failed: {res.get('msg')} for player {player_id}")
+                    logging.warning(f"Force-redeem FAILED: {res.get('msg')} for player {player_id}")
 
         # Final reporting
         if rate_limited:
