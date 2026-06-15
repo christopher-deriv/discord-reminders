@@ -44,6 +44,12 @@ def init_db():
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS processed_gift_codes (
+                gift_code TEXT PRIMARY KEY,
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
 
 def add_reminder(guild_id, event_name, target_time, channel_id, created_by, gif_url=None, recurrence='daily', target_date=None):
@@ -220,6 +226,27 @@ def delete_active_code(gift_code):
             return True
     except Exception as e:
         print(f"Database error (delete_active_code): {e}")
+        return False
+
+def is_code_processed(gift_code):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM processed_gift_codes WHERE gift_code = ?", (gift_code,))
+            return cursor.fetchone() is not None
+    except Exception as e:
+        print(f"Database error (is_code_processed): {e}")
+        return False
+
+def mark_code_processed(gift_code):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR IGNORE INTO processed_gift_codes (gift_code) VALUES (?)", (gift_code,))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"Database error (mark_code_processed): {e}")
         return False
 
 def get_active_codes():

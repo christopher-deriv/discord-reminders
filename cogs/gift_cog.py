@@ -225,16 +225,23 @@ class GiftCog(commands.Cog):
 
                 # 4. Consolidated Reporting for this guild
                 # Only post if at least one code was actually successfully redeemed (success_count > 0) to prevent flooding.
+                # AND only if at least one of the redeemed codes is new (has not been processed before this cycle).
                 if redemptions_attempted and success_count > 0:
-                    await self.post_summary_report(
-                        guild_id, 
-                        len(active_codes), 
-                        len(players), 
-                        success_count, 
-                        failure_count, 
-                        rate_limited, 
-                        list(successfully_redeemed_codes)
-                    )
+                    new_redeemed_codes = [c for c in successfully_redeemed_codes if not database.is_code_processed(c)]
+                    if new_redeemed_codes:
+                        await self.post_summary_report(
+                            guild_id, 
+                            len(active_codes), 
+                            len(players), 
+                            success_count, 
+                            failure_count, 
+                            rate_limited, 
+                            list(successfully_redeemed_codes)
+                        )
+
+        # Mark all active codes processed in this cycle as processed
+        for code in active_codes:
+            database.mark_code_processed(code)
 
     async def post_summary_report(self, guild_id, total_codes, total_players, success_count, failure_count, rate_limited, redeemed_codes):
         """
@@ -472,6 +479,9 @@ class GiftCog(commands.Cog):
                 f"* Failures/Skipped (CAPTCHA/Error): **{failure_count}**",
                 ephemeral=True
             )
+
+        # Mark code as processed to avoid background poller reporting it again
+        database.mark_code_processed(code_clean)
 
 async def setup(bot):
     await bot.add_cog(GiftCog(bot))
