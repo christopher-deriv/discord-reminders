@@ -211,6 +211,17 @@ def add_active_code(gift_code):
         print(f"Database error (add_active_code): {e}")
         return False
 
+def delete_active_code(gift_code):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM active_gift_codes WHERE gift_code = ?", (gift_code,))
+            conn.commit()
+            return True
+    except Exception as e:
+        print(f"Database error (delete_active_code): {e}")
+        return False
+
 def get_active_codes():
     try:
         with sqlite3.connect(DB_PATH) as conn:

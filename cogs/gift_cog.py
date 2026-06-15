@@ -209,6 +209,10 @@ class GiftCog(commands.Cog):
                         else:
                             failure_count += 1
                             logging.warning(f"Auto-redeem FAILED: {res.get('msg')} for player {player_id}")
+                            if "CDK NOT FOUND" in msg_str:
+                                logging.info(f"Code '{code}' is invalid/expired (CDK NOT FOUND). Removing from active codes database.")
+                                database.delete_active_code(code)
+                                active_codes.discard(code)
 
                     if rate_limited:
                         logging.error("IP rate limit hit. Aborting background redemption queue for this cycle.")
@@ -446,6 +450,10 @@ class GiftCog(commands.Cog):
                 else:
                     failure_count += 1
                     logging.warning(f"Force-redeem FAILED: {res.get('msg')} for player {player_id}")
+                    if "CDK NOT FOUND" in msg_str:
+                        logging.info(f"Code '{code_clean}' is invalid/expired (CDK NOT FOUND). Removing from active codes database and aborting force redemption.")
+                        database.delete_active_code(code_clean)
+                        break
 
         # Final reporting
         if rate_limited:
