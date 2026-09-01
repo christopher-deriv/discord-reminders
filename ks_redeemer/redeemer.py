@@ -43,7 +43,7 @@ def make_post_request(endpoint: str, data: dict) -> dict:
     url = f"{API_BASE_URL}/{endpoint}"
     
     if "time" not in data:
-        data["time"] = str(int(time.time() * 1000))
+        data["time"] = str(int(time.time()))
     if "sign" not in data:
         data["sign"] = generate_signature(data)
         
@@ -56,19 +56,13 @@ def make_post_request(endpoint: str, data: dict) -> dict:
     except Exception as e:
         return {"code": -1, "msg": str(e)}
 
-def verify_player(fid: str) -> dict:
+def redeem_code(fid: str, kid: str, cdk: str) -> dict:
     """
-    Queries the KingShot API to fetch details about a player by Player ID (fid).
-    """
-    payload = {"fid": str(fid)}
-    return make_post_request("player", payload)
-
-def redeem_code(fid: str, cdk: str) -> dict:
-    """
-    Redeems a gift code (cdk) for a given Player ID (fid).
+    Redeems a gift code (cdk) for a given Player ID (fid) and Kingdom ID (kid).
     """
     payload = {
         "fid": str(fid),
+        "kid": str(kid),
         "cdk": str(cdk),
         "captcha_code": ""
     }
@@ -135,6 +129,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Redeem KingShot Gift Codes for multiple players with rate-limiting delays.")
     parser.add_argument("--ids", type=str, help="Comma or space-separated list of Player IDs (FIDs)")
+    parser.add_argument("--kids", type=str, default="141", help="Comma or space-separated list of Kingdom IDs (defaults to 141)")
     parser.add_argument("--codes", type=str, help="Comma or space-separated list of Gift Codes (CDKs)")
     parser.add_argument("--delay", type=str, default="2-5", help="Delay config in seconds (default: '2-5' range)")
     args = parser.parse_args()
@@ -143,14 +138,17 @@ def main():
     if not args.ids or not args.codes:
         print("[*] Entering interactive mode...")
         raw_ids = input("Enter Player ID(s) (separated by commas or spaces): ").strip()
+        raw_kids = input("Enter Kingdom ID(s) (default '141', or match each Player ID): ").strip()
         raw_codes = input("Enter Gift Code(s) (separated by commas or spaces): ").strip()
         
         player_ids = parse_list(raw_ids)
+        kingdom_ids = parse_list(raw_kids) if raw_kids else ["141"]
         gift_codes = parse_list(raw_codes)
         # Automatically use 2-5s randomized range for interactive mode
         delay_config = (2.0, 5.0)
     else:
         player_ids = parse_list(args.ids)
+        kingdom_ids = parse_list(args.kids) if args.kids else ["141"]
         gift_codes = parse_list(args.codes)
         delay_config = parse_delay(args.delay)
 
@@ -161,10 +159,19 @@ def main():
         print("[-] Error: At least one Gift Code (CDK) is required.")
         return
 
+    # If only one kingdom is provided, apply it to all players
+    if len(kingdom_ids) == 1 and len(player_ids) > 1:
+        kingdom_ids = [kingdom_ids[0]] * len(player_ids)
+    elif len(kingdom_ids) < len(player_ids):
+        # Pad remaining with last kingdom provided or 141
+        last_kid = kingdom_ids[-1] if kingdom_ids else "141"
+        kingdom_ids.extend([last_kid] * (len(player_ids) - len(kingdom_ids)))
+
     print("\n[*] Initializing redemption queue:")
     print(f"    Player IDs ({len(player_ids)}): {', '.join(player_ids)}")
+    print(f"    Kingdom IDs   : {', '.join(kingdom_ids)}")
     print(f"    Gift Codes ({len(gift_codes)}): {', '.join(gift_codes)}")
-    print(f"    Delay setting  : {get_delay_display(delay_config)} (Automatic)")
+    print(f"    Delay setting : {get_delay_display(delay_config)} (Automatic)")
     print("-" * 65)
 
     # Mimic browser opening config
@@ -174,31 +181,14 @@ def main():
     execute_delay(delay_config)
 
     for p_idx, fid in enumerate(player_ids):
-        print(f"\n[{p_idx + 1}/{len(player_ids)}] Processing Player ID: {fid} ...")
-        
-        # 1. Verify Player details
-        player_res = verify_player(fid)
-        if player_res.get("code") != 0 or not player_res.get("data"):
-            msg = player_res.get("msg", "Player not found or query error")
-            print(f"  [-] Skip: Could not verify Player ID {fid}. Reason: {msg}")
-            execute_delay(delay_config)
-            continue
+        kid = kingdom_ids[p_idx]
+        print(f"\n[{p_idx + 1}/{len(player_ids)}] Processing Player ID: {fid} (Kingdom #{kid}) ...")
 
-        player_data = player_res["data"]
-        nickname = player_data.get("nickname", "Unknown")
-        kid = player_data.get("kid", "N/A")
-        stove_lv = player_data.get("stove_lv", "N/A")
-        
-        print(f"  [+] Player Verified: {nickname} (Kingdom #{kid}, Stove Level: {stove_lv})")
-        
-        # Introduce delay before moving to codes
-        execute_delay(delay_config)
-
-        # 2. Iterate through codes for this verified player
+        # Iterate through codes for this player
         for c_idx, cdk in enumerate(gift_codes):
             print(f"  [{c_idx + 1}/{len(gift_codes)}] Redeeming code '{cdk}'...")
             
-            redeem_res = redeem_code(fid, cdk)
+            redeem_res = redeem_code(fid, kid, cdk)
             code = redeem_res.get("code")
             msg = redeem_res.get("msg", "No response message")
             err_code = redeem_res.get("err_code")
@@ -207,6 +197,8 @@ def main():
                 print(f"    [+] SUCCESS: Code '{cdk}' successfully redeemed!")
             elif code == 1 and err_code == 40008:
                 print(f"    [!] Info: Code '{cdk}' has ALREADY been claimed on this account.")
+            elif code == 1 and err_code == 40020:
+                print(f"    [-] Failed: Character info incorrect (Kingdom #{kid} does not match Player ID {fid})")
             else:
                 print(f"    [-] Failed: {msg} (Error Code: {err_code})")
 

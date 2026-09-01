@@ -38,31 +38,22 @@ class TestInputValidation(unittest.TestCase):
         sys.modules['google.auth'] = MagicMock()
         sys.modules['google.auth.exceptions'] = MagicMock()
 
-        # Reload bot to apply mocks and re-execute class definitions
-        if 'bot' in sys.modules:
-            del sys.modules['bot']
-        import bot
-        self.bot = bot
+        # Clear any cached modules
+        for mod in list(sys.modules.keys()):
+            if 'cogs' in mod or 'bot' in mod:
+                del sys.modules[mod]
+
+        import importlib
+        import cogs.reminder_cog
+        self.reminder_cog = importlib.reload(cogs.reminder_cog)
 
     def test_reminder_modal_event_name_length(self):
-        # Check ReminderModal (class level)
-        # Note: Since we reload bot, the class definition runs again.
-        # We check the calls made during import/class definition.
-
         calls = self.mock_text_input.call_args_list
-
         found = False
         for call in calls:
             kwargs = call.kwargs
             if kwargs.get('label') == 'Event Name':
-                # We might find multiple calls (one from ReminderModal, one from EditReminderModal probably not instantiated yet but maybe referenced?)
-                # Actually, both classes are defined at import time.
-                # ReminderModal defines event_name at class level.
-                # EditReminderModal defines event_name in __init__.
-
-                # So we expect to find the one from ReminderModal here.
-                # If we find one, we check it.
-                if 'placeholder' in kwargs: # ReminderModal has placeholder
+                if 'placeholder' in kwargs:
                      self.assertEqual(kwargs.get('max_length'), 100, "ReminderModal Event Name should have max_length=100")
                      found = True
 
@@ -73,7 +64,7 @@ class TestInputValidation(unittest.TestCase):
         self.mock_text_input.reset_mock()
 
         try:
-            modal = self.bot.EditReminderModal(1, "Test", "12:00")
+            modal = self.reminder_cog.EditReminderModal(1, "Test", "12:00")
         except Exception as e:
             self.fail(f"Failed to instantiate EditReminderModal: {e}")
 

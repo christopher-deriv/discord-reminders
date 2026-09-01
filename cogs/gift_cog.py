@@ -112,7 +112,7 @@ class GiftCog(commands.Cog):
             import sqlite3
             with sqlite3.connect(database.DB_PATH) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT discord_id, guild_id, player_id, player_name FROM alliance_players")
+                cursor.execute("SELECT discord_id, guild_id, player_id, kingdom_id, player_name FROM alliance_players")
                 all_players = cursor.fetchall()
         except Exception as e:
             logging.error(f"Failed to query players for background auto-redemption: {e}")
@@ -124,10 +124,10 @@ class GiftCog(commands.Cog):
 
         # Group players by guild to enable server-specific isolation and summary reports
         guild_players = {}
-        for discord_id, guild_id, player_id, player_name in all_players:
+        for discord_id, guild_id, player_id, kingdom_id, player_name in all_players:
             if guild_id not in guild_players:
                 guild_players[guild_id] = []
-            guild_players[guild_id].append((discord_id, player_id, player_name))
+            guild_players[guild_id].append((discord_id, player_id, kingdom_id or "141", player_name))
 
         # 3. Process each guild sequentially
         async with kingshot_client.KingShotClient() as client:
@@ -142,7 +142,7 @@ class GiftCog(commands.Cog):
                 redemptions_attempted = False
                 successfully_redeemed_codes = set()
 
-                for p_idx, (discord_id, player_id, player_name) in enumerate(players):
+                for p_idx, (discord_id, player_id, kingdom_id, player_name) in enumerate(players):
                     # Filter codes that this specific player has not yet redeemed
                     unclaimed_codes = [code for code in active_codes if not database.has_redeemed(player_id, code)]
                     if not unclaimed_codes:
@@ -151,18 +151,11 @@ class GiftCog(commands.Cog):
                     # Apply player-transition delay if transitioning between accounts
                     if redemptions_attempted:
                         delay = random.uniform(5.0, 10.0)
-                        logging.info(f"Anti-flag: Waiting {delay:.2f}s before processing player {player_id}...")
+                        logging.info(f"Anti-flag: Waiting {delay:.2f}s before processing player {player_id} (Kingdom #{kingdom_id})...")
                         await asyncio.sleep(delay)
 
                     redemptions_attempted = True
                     player_failed = False
-
-                    # Always verify/login the player first to establish the API session
-                    verify_res = await client.verify_player(player_id)
-                    if verify_res.get("code") != 0:
-                        logging.warning(f"Verify/Login failed for player {player_id}: {verify_res.get('msg')}")
-                        failure_count += len(unclaimed_codes)
-                        continue
 
                     for c_idx, code in enumerate(unclaimed_codes):
                         # Apply inter-code delay between individual code attempts for the same player
@@ -170,9 +163,9 @@ class GiftCog(commands.Cog):
                             delay = random.uniform(2.0, 5.0)
                             await asyncio.sleep(delay)
 
-                        logging.info(f"Auto-redeem: Code '{code}' for player '{player_name}' ({player_id})")
+                        logging.info(f"Auto-redeem: Code '{code}' for player '{player_name}' ({player_id}, Kingdom #{kingdom_id})")
                         
-                        res = await client.redeem_with_captcha_solver(player_id, code)
+                        res = await client.redeem_with_captcha_solver(player_id, kingdom_id, code)
                         res_code = res.get("code")
                         err_code = res.get("err_code")
                         
@@ -193,22 +186,22 @@ class GiftCog(commands.Cog):
                         if is_success:
                             success_count += 1
                             successfully_redeemed_codes.add(code)
-                            logging.info(f"Auto-redeem SUCCESS: Code '{code}' for player '{player_name}' ({player_id})")
+                            logging.info(f"Auto-redeem SUCCESS: Code '{code}' for player '{player_name}' ({player_id}, Kingdom #{kingdom_id})")
                             database.add_redemption_record(player_id, code)
                         elif is_already_claimed:
-                            logging.info(f"Auto-redeem ALREADY CLAIMED: Code '{code}' for player '{player_name}' ({player_id})")
+                            logging.info(f"Auto-redeem ALREADY CLAIMED: Code '{code}' for player '{player_name}' ({player_id}, Kingdom #{kingdom_id})")
                             database.add_redemption_record(player_id, code)
                         elif is_same_type:
-                            logging.info(f"Auto-redeem SAME TYPE RESTRICTION: Code '{code}' for player '{player_name}' ({player_id})")
+                            logging.info(f"Auto-redeem SAME TYPE RESTRICTION: Code '{code}' for player '{player_name}' ({player_id}, Kingdom #{kingdom_id})")
                             database.add_redemption_record(player_id, code)
                         elif is_captcha:
                             failure_count += 1
                             player_failed = True
-                            logging.warning(f"Auto-redeem FAILED: CAPTCHA required ({res.get('msg')}) for player {player_id}")
+                            logging.warning(f"Auto-redeem FAILED: CAPTCHA required ({res.get('msg')}) for player {player_id} (Kingdom #{kingdom_id})")
                             break # Blocked by CAPTCHA, skip other codes for this player
                         else:
                             failure_count += 1
-                            logging.warning(f"Auto-redeem FAILED: {res.get('msg')} for player {player_id}")
+                            logging.warning(f"Auto-redeem FAILED: {res.get('msg')} for player {player_id} (Kingdom #{kingdom_id})")
                             if "CDK NOT FOUND" in msg_str:
                                 logging.info(f"Code '{code}' is invalid/expired (CDK NOT FOUND). Removing from active codes database.")
                                 database.delete_active_code(code)
@@ -293,40 +286,36 @@ class GiftCog(commands.Cog):
     async def before_poll_gift_codes(self):
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="register", description="Register a KingShot Player ID")
-    async def register(self, interaction: discord.Interaction, player_id: str):
-        logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /register with Player ID {player_id}")
-        await interaction.response.defer(ephemeral=True)
+    @app_commands.command(name="register", description="Register a KingShot Player ID and Kingdom ID")
+    @app_commands.describe(
+        player_id="Your KingShot Player ID (found via Avatar)",
+        kingdom_id="Your Kingdom Number (e.g. 141, 104)",
+        nickname="Optional character nickname for display"
+    )
+    async def register(self, interaction: discord.Interaction, player_id: str, kingdom_id: str = "141", nickname: str = None):
+        pid_clean = player_id.strip()
+        kid_clean = kingdom_id.strip()
+        display_name = nickname.strip() if nickname else pid_clean
+        logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /register with Player ID {pid_clean}, Kingdom {kid_clean}")
 
-        async with kingshot_client.KingShotClient() as client:
-            res = await client.verify_player(player_id)
-            
-            if res.get("code") != 0 or not res.get("data"):
-                msg = res.get("msg", "Player verification failed")
-                await interaction.followup.send(f"[-] Registration failed: {msg}.", ephemeral=True)
-                return
-
-            player_data = res["data"]
-            nickname = player_data.get("nickname", "Unknown")
-            kid = player_data.get("kid", "N/A")
-            success = database.register_player(interaction.user.id, interaction.guild_id, player_id, nickname)
-            if success:
-                await interaction.followup.send(
-                    f"[+] Player ID **{player_id}** successfully registered!\n"
-                    f"* Nickname: **{nickname}**\n"
-                    f"* Kingdom: **#{kid}**",
-                    ephemeral=True
-                )
-            else:
-                await interaction.followup.send("[-] Registration failed: Database write error.", ephemeral=True)
+        success = database.register_player(interaction.user.id, interaction.guild_id, pid_clean, kid_clean, display_name)
+        if success:
+            await interaction.response.send_message(
+                f"[+] Player ID **{pid_clean}** successfully registered!\n"
+                f"* Nickname: **{display_name}**\n"
+                f"* Kingdom: **#{kid_clean}**",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("[-] Registration failed: Database write error.", ephemeral=True)
 
     @app_commands.command(name="unregister", description="Unregister a KingShot Player ID")
     async def unregister(self, interaction: discord.Interaction, player_id: str):
         logging.info(f"User {interaction.user} (ID: {interaction.user.id}) initiated /unregister with Player ID {player_id}")
         
-        success = database.unregister_player(interaction.user.id, interaction.guild_id, player_id)
+        success = database.unregister_player(interaction.user.id, interaction.guild_id, player_id.strip())
         if success:
-            await interaction.response.send_message(f"[+] Player ID **{player_id}** successfully unregistered.", ephemeral=True)
+            await interaction.response.send_message(f"[+] Player ID **{player_id.strip()}** successfully unregistered.", ephemeral=True)
         else:
             await interaction.response.send_message("[-] Unregistration failed: Database error.", ephemeral=True)
 
@@ -339,7 +328,7 @@ class GiftCog(commands.Cog):
             await interaction.response.send_message("You have no registered players in this guild.", ephemeral=True)
             return
 
-        player_list = "\n".join([f"• **{name}** (ID: `{pid}`)" for pid, name in players])
+        player_list = "\n".join([f"• **{name}** (ID: `{pid}`, Kingdom: `#{kid}`)" for pid, kid, name in players])
         await interaction.response.send_message(f"### Your Registered KingShot Players:\n{player_list}", ephemeral=True)
 
     @app_commands.command(name="my-redemptions", description="Check which gift codes have been successfully redeemed for your accounts")
@@ -358,7 +347,7 @@ class GiftCog(commands.Cog):
             timestamp=discord.utils.utcnow()
         )
 
-        for pid, name in players:
+        for pid, kid, name in players:
             history = database.get_redemption_history(pid)
             if history:
                 lines = []
@@ -370,7 +359,7 @@ class GiftCog(commands.Cog):
                 val_text = "*No gift codes redeemed yet.*"
             
             embed.add_field(
-                name=f"👤 Player: {name} (ID: {pid})",
+                name=f"👤 Player: {name} (ID: {pid}, Kingdom: #{kid})",
                 value=val_text,
                 inline=False
             )
@@ -407,7 +396,7 @@ class GiftCog(commands.Cog):
         redemptions_attempted = False
 
         async with kingshot_client.KingShotClient() as client:
-            for p_idx, (discord_id, player_id, player_name) in enumerate(players):
+            for p_idx, (discord_id, player_id, kingdom_id, player_name) in enumerate(players):
                 # Skip if already redeemed
                 if database.has_redeemed(player_id, code_clean):
                     continue
@@ -418,16 +407,10 @@ class GiftCog(commands.Cog):
                     await asyncio.sleep(delay)
 
                 redemptions_attempted = True
-                logging.info(f"Force-redeem: Attempting code '{code_clean}' for player '{player_name}' ({player_id}) [{p_idx + 1}/{len(players)}]")
+                kid = kingdom_id or "141"
+                logging.info(f"Force-redeem: Attempting code '{code_clean}' for player '{player_name}' ({player_id}, Kingdom #{kid}) [{p_idx + 1}/{len(players)}]")
 
-                # Always verify/login the player first to establish the API session
-                verify_res = await client.verify_player(player_id)
-                if verify_res.get("code") != 0:
-                    logging.warning(f"Verify/Login failed for player {player_id}: {verify_res.get('msg')}")
-                    failure_count += 1
-                    continue
-
-                res = await client.redeem_with_captcha_solver(player_id, code_clean)
+                res = await client.redeem_with_captcha_solver(player_id, kid, code_clean)
                 res_code = res.get("code")
                 err_code = res.get("err_code")
 

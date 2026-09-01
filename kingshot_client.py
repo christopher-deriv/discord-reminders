@@ -173,7 +173,7 @@ class KingShotClient:
         url = f"{API_BASE_URL}/{endpoint}"
         
         if "time" not in data:
-            data["time"] = str(int(time.time() * 1000))
+            data["time"] = str(int(time.time()))
         if "sign" not in data:
             data["sign"] = self.generate_signature(data)
             
@@ -193,33 +193,34 @@ class KingShotClient:
             logging.error(f"Error during KingShot POST request: {e}")
             return {"code": -1, "msg": str(e)}
 
-    async def verify_player(self, fid: str) -> dict:
-        payload = {"fid": str(fid)}
-        return await self.make_post_request("player", payload)
+    async def verify_player(self, fid: str, kid: str = "141") -> dict:
+        # Note: Century Games deprecated /api/player. We return a local success structure
+        return {"code": 0, "data": {"fid": str(fid), "kid": str(kid)}}
 
     async def get_config(self) -> dict:
         return await self.make_post_request("gift_code_config", {})
 
     async def fetch_captcha(self, fid: str) -> dict:
         payload = {
-            "fid": str(fid),
-            "init": "0"
+            "fid": str(fid)
         }
-        return await self.make_post_request("get_captcha", payload)
+        return await self.make_post_request("captcha", payload)
 
-    async def redeem_code(self, fid: str, cdk: str, captcha_code: str = "") -> dict:
+    async def redeem_code(self, fid: str, kid: str, cdk: str, captcha_code: str = "") -> dict:
         payload = {
             "fid": str(fid),
-            "cdk": str(cdk),
-            "captcha_code": captcha_code
+            "kid": str(kid),
+            "cdk": str(cdk)
         }
+        if captcha_code:
+            payload["captcha_code"] = captcha_code
         return await self.make_post_request("gift_code", payload)
 
-    async def redeem_with_captcha_solver(self, fid: str, cdk: str) -> dict:
+    async def redeem_with_captcha_solver(self, fid: str, kid: str, cdk: str) -> dict:
         """
         Attempts to redeem a gift code. Handles automated ML solver cycle and fallbacks.
         """
-        res = await self.redeem_code(fid, cdk)
+        res = await self.redeem_code(fid, kid, cdk)
         
         code = res.get("code")
         err_code = res.get("err_code")
@@ -230,7 +231,7 @@ class KingShotClient:
         
         if is_captcha:
             if self.solver.enabled:
-                logging.info(f"CAPTCHA challenge detected for player {fid}. Fetching CAPTCHA image...")
+                logging.info(f"CAPTCHA challenge detected for player {fid} (Kingdom #{kid}). Fetching CAPTCHA image...")
                 captcha_res = await self.fetch_captcha(fid)
                 captcha_data = captcha_res.get("data") or {}
                 captcha_base64 = captcha_data.get("img")
@@ -241,14 +242,14 @@ class KingShotClient:
                     solved_code = await asyncio.to_thread(self.solver.solve, captcha_base64)
                     
                     if solved_code:
-                        logging.info(f"Resubmitting redemption for player {fid} with solved CAPTCHA: '{solved_code}'")
-                        res = await self.redeem_code(fid, cdk, captcha_code=solved_code)
+                        logging.info(f"Resubmitting redemption for player {fid} (Kingdom #{kid}) with solved CAPTCHA: '{solved_code}'")
+                        res = await self.redeem_code(fid, kid, cdk, captcha_code=solved_code)
                     else:
                         logging.warning(f"ML Solver returned empty CAPTCHA string. Skipping player {fid}.")
                 else:
                     err_msg = captcha_res.get("msg", "Unknown error")
                     logging.warning(f"Failed to fetch CAPTCHA image (msg: {err_msg}). Skipping player {fid}.")
             else:
-                logging.warning(f"CAPTCHA required for player {fid} but ML Solver is disabled. Skipping player.")
+                logging.warning(f"CAPTCHA required for player {fid} (Kingdom #{kid}) but ML Solver is disabled. Skipping player.")
                 
         return res

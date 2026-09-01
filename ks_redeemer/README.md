@@ -14,11 +14,11 @@ Through network analysis of the HTTP Archive (HAR) and static analysis of the dy
 All requests are submitted as `POST` payloads with `application/x-www-form-urlencoded` encoding to `https://kingshot-giftcode.centurygame.com/api`:
 
 * **Retrieve Config**: `/api/gift_code_config`
-  * Payload: `time=<timestamp>&sign=<signature>`
-* **Verify Player**: `/api/player`
-  * Payload: `fid=<player_id>&time=<timestamp>&sign=<signature>`
+  * Payload: `time=<timestamp_seconds>&sign=<signature>`
+* **Get Captcha**: `/api/captcha`
+  * Payload: `fid=<player_id>&time=<timestamp_seconds>&sign=<signature>`
 * **Redeem Code**: `/api/gift_code`
-  * Payload: `captcha_code=&cdk=<gift_code>&fid=<player_id>&time=<timestamp>&sign=<signature>`
+  * Payload: `captcha_code=&cdk=<gift_code>&fid=<player_id>&kid=<kingdom_id>&time=<timestamp_seconds>&sign=<signature>`
 
 ### 2. Request Signing (`sign`)
 To prevent unauthorized/automated requests, the server validates a cryptographic `sign` parameter. The client-side signature generation follows these rules:
@@ -29,9 +29,8 @@ To prevent unauthorized/automated requests, the server validates a cryptographic
 5. Compute the **MD5 hash** of the final concatenated string.
 
 #### Signature Formula Examples:
-* **Config Check**: `time={timestamp}mN4!pQs6JrYwV9`
-* **Player Lookup**: `fid={player_id}&time={timestamp}mN4!pQs6JrYwV9`
-* **Redemption**: `captcha_code={captcha_code}&cdk={gift_code}&fid={player_id}&time={timestamp}mN4!pQs6JrYwV9`
+* **Config Check**: `time={timestamp_seconds}mN4!pQs6JrYwV9`
+* **Redemption**: `captcha_code={captcha_code}&cdk={gift_code}&fid={player_id}&kid={kingdom_id}&time={timestamp_seconds}mN4!pQs6JrYwV9`
 
 ---
 
@@ -40,8 +39,7 @@ To prevent unauthorized/automated requests, the server validates a cryptographic
 The [redeemer.py](redeemer.py) script is designed for safety, speed, and ease of use:
 
 * **Automatic Anti-Flagging Delays**: Randomizes the sleep time between requests (default: `2.0` to `5.0` seconds) to break predictable bot patterns and prevent flagging/bans by anomaly-detection firewalls.
-* **Multi-Account Queue**: Processes multiple Player IDs and multiple Gift Codes in a single run, verifying accounts and running redemptions sequentially.
-* **Account Verification**: Queries and displays the player's Nickname, Kingdom, and Stove Level before attempting to redeem codes, ensuring Player IDs are valid.
+* **Multi-Account Queue**: Processes multiple Player IDs and multiple Gift Codes in a single run, running redemptions sequentially with Kingdom matching.
 * **Dual Operation Modes**: Works both in a command-line arguments mode and a simple interactive wizard.
 
 ---
@@ -64,13 +62,14 @@ python redeemer.py
 You will be prompted:
 ```text
 Enter Player ID(s) (separated by commas or spaces): 129284382, 28633797
+Enter Kingdom ID(s) (default '141', or match each Player ID): 141
 Enter Gift Code(s) (separated by commas or spaces): EIDALADHA0527, OFFICIALSTORE27
 ```
 
 ### 2. Command-Line Arguments Mode
-Specify the Player IDs and Gift Codes directly. By default, this uses the automatic `2-5` second randomized delay:
+Specify the Player IDs, Kingdom IDs, and Gift Codes directly. By default, this uses the automatic `2-5` second randomized delay:
 ```bash
-python redeemer.py --ids "129284382,28633797" --codes "EIDALADHA0527,OFFICIALSTORE27"
+python redeemer.py --ids "129284382,28633797" --kids "141" --codes "EIDALADHA0527,OFFICIALSTORE27"
 ```
 
 #### Custom Delays (Optional)

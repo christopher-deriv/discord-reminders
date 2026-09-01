@@ -26,6 +26,7 @@ def init_db():
                 discord_id INTEGER NOT NULL,
                 guild_id INTEGER NOT NULL,
                 player_id TEXT NOT NULL,
+                kingdom_id TEXT DEFAULT '141',
                 player_name TEXT,
                 PRIMARY KEY (guild_id, player_id)
             )
@@ -50,6 +51,15 @@ def init_db():
                 processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Automatic Migration: check if kingdom_id column exists in alliance_players
+        cursor.execute("PRAGMA table_info(alliance_players)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "kingdom_id" not in columns:
+            cursor.execute("ALTER TABLE alliance_players ADD COLUMN kingdom_id TEXT DEFAULT '141'")
+            
+        # One-time backfill: populate any NULL/empty kingdom_id with '141'
+        cursor.execute("UPDATE alliance_players SET kingdom_id = '141' WHERE kingdom_id IS NULL OR kingdom_id = ''")
         conn.commit()
 
 def add_reminder(guild_id, event_name, target_time, channel_id, created_by, gif_url=None, recurrence='daily', target_date=None):
@@ -122,14 +132,14 @@ def update_reminder(reminder_id, event_name, target_time, gif_url=None):
         print(f"Database error: {e}")
         return False
 
-def register_player(discord_id, guild_id, player_id, player_name):
+def register_player(discord_id, guild_id, player_id, kingdom_id="141", player_name=None):
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO alliance_players (discord_id, guild_id, player_id, player_name)
-                VALUES (?, ?, ?, ?)
-            """, (discord_id, guild_id, player_id, player_name))
+                INSERT OR REPLACE INTO alliance_players (discord_id, guild_id, player_id, kingdom_id, player_name)
+                VALUES (?, ?, ?, ?, ?)
+            """, (discord_id, guild_id, player_id, str(kingdom_id), player_name or player_id))
             conn.commit()
             return True
     except Exception as e:
@@ -155,7 +165,7 @@ def get_registered_players(discord_id, guild_id):
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT player_id, player_name FROM alliance_players
+                SELECT player_id, kingdom_id, player_name FROM alliance_players
                 WHERE discord_id = ? AND guild_id = ?
             """, (discord_id, guild_id))
             return cursor.fetchall()
@@ -168,7 +178,7 @@ def get_all_guild_players(guild_id):
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT discord_id, player_id, player_name FROM alliance_players
+                SELECT discord_id, player_id, kingdom_id, player_name FROM alliance_players
                 WHERE guild_id = ?
             """, (guild_id,))
             return cursor.fetchall()

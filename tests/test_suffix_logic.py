@@ -8,15 +8,23 @@ class TestSuffixLogic(unittest.TestCase):
         self.mock_discord = MagicMock()
         self.mock_discord_ui = MagicMock()
 
-        # Mocking Select to be able to instantiate EditSelect
         class MockSelect:
+            def __init_subclass__(cls, **kwargs):
+                pass
             def __init__(self, *args, **kwargs):
                 self.placeholder = kwargs.get('placeholder')
-                self.options = kwargs.get('options')
+                self.options = kwargs.get('options', [])
+
+        class MockSelectOption:
+            def __init__(self, *args, **kwargs):
+                self.label = kwargs.get('label')
+                self.description = kwargs.get('description')
+                self.value = kwargs.get('value')
 
         self.mock_discord_ui.Select = MockSelect
+        self.mock_discord_ui.SelectOption = MockSelectOption
         self.mock_discord.ui = self.mock_discord_ui
-        self.mock_discord.SelectOption = MagicMock
+        self.mock_discord.SelectOption = MockSelectOption
 
         # Mock modules
         sys.modules['discord'] = self.mock_discord
@@ -34,13 +42,14 @@ class TestSuffixLogic(unittest.TestCase):
         sys.modules['google.auth'] = MagicMock()
         sys.modules['google.auth.exceptions'] = MagicMock()
 
-        if 'bot' in sys.modules:
-            del sys.modules['bot']
-        import bot
-        self.bot = bot
+        for mod in list(sys.modules.keys()):
+            if 'cogs' in mod or 'bot' in mod:
+                del sys.modules[mod]
+        import importlib
+        import cogs.reminder_cog
+        self.reminder_cog = importlib.reload(cogs.reminder_cog)
 
     def test_monthly_suffix_logic(self):
-        # Test cases for different days
         test_data = [
             (1, "1st"),
             (2, "2nd"),
@@ -57,37 +66,10 @@ class TestSuffixLogic(unittest.TestCase):
         ]
 
         for day, expected_suffix in test_data:
-            # Create a mock reminder
-            # rid, name, time, channel_id, gif_url, recurrence, target_date
             reminders = [(1, "Test Event", "12:00", 123, None, 'monthly', f"2023-01-{day:02d}")]
-
-            # Instantiate EditSelect
-            edit_select = self.bot.EditSelect(reminders)
-
-            # Check the description of the first option
-            option_call = self.mock_discord.SelectOption.call_args
-            # The constructor of EditSelect calls SelectOption for each reminder
-            # Since we only gave one reminder, it's the last call (actually the only call)
-            # However, since we might be calling it multiple times in this loop, we should check how we captured it.
-
-            # Wait, EditSelect calls discord.SelectOption(...) and appends to options list.
-            # My mock for SelectOption just returns something.
-            # I need to capture the arguments.
-
-            # Actually, let's redefine SelectOption mock to return a mock object that stores its args
-            def select_option_side_effect(**kwargs):
-                mock_opt = MagicMock()
-                mock_opt.description = kwargs.get('description')
-                return mock_opt
-
-            self.mock_discord.SelectOption.side_effect = select_option_side_effect
-
-            edit_select = self.bot.EditSelect(reminders)
+            edit_select = self.reminder_cog.EditSelect(reminders)
+            self.assertTrue(len(edit_select.options) > 0)
             description = edit_select.options[0].description
-
-            # Current behavior is: f" (Monthly on the {day_num})"
-            # Expected behavior after fix: f" (Monthly on the {day_num}{suffix})"
-
             expected_desc_part = f" (Monthly on the {expected_suffix})"
             self.assertIn(expected_desc_part, description, f"Day {day} should have suffix {expected_suffix}")
 
